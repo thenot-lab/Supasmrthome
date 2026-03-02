@@ -56,10 +56,20 @@ app = FastAPI(
     version="2.0.0",
 )
 
-# Enable CORS for mobile / cross-origin access
+# Enable CORS for local development and mobile apps.
+# In production, replace with specific allowed origins.
+CORS_ORIGINS = [
+    "http://localhost:7860",
+    "http://localhost:3000",
+    "http://127.0.0.1:7860",
+    "http://127.0.0.1:3000",
+    "http://10.0.2.2:7860",     # Android emulator → host
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ORIGINS,
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1|10\.0\.2\.2)(:\d+)?",
     allow_methods=["*"],
     allow_headers=["*"],
 )

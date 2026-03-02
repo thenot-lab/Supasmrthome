@@ -28,8 +28,30 @@ cd "$(dirname "$0")"
 MODE="${1:-debug}"
 GRADLEW="./gradlew"
 
+# Ensure Gradle wrapper JAR exists; download if missing
+WRAPPER_JAR="gradle/wrapper/gradle-wrapper.jar"
+if [ ! -f "$WRAPPER_JAR" ]; then
+    echo "Downloading Gradle wrapper JAR..."
+    mkdir -p gradle/wrapper
+    GRADLE_VERSION="8.5"
+    WRAPPER_URL="https://raw.githubusercontent.com/gradle/gradle/v${GRADLE_VERSION}/gradle/wrapper/gradle-wrapper.jar"
+    if command -v curl &> /dev/null; then
+        curl -sL -o "$WRAPPER_JAR" "$WRAPPER_URL" || true
+    elif command -v wget &> /dev/null; then
+        wget -q -O "$WRAPPER_JAR" "$WRAPPER_URL" || true
+    fi
+    # If download failed, try generating via system gradle
+    if [ ! -s "$WRAPPER_JAR" ]; then
+        rm -f "$WRAPPER_JAR"
+        if command -v gradle &> /dev/null; then
+            echo "Generating wrapper via system gradle..."
+            gradle wrapper --gradle-version "$GRADLE_VERSION"
+        fi
+    fi
+fi
+
 # Check for Gradle wrapper; if not present, use system gradle
-if [ ! -f "$GRADLEW" ]; then
+if [ ! -f "$GRADLEW" ] || [ ! -f "$WRAPPER_JAR" ]; then
     echo "Gradle wrapper not found. Using system gradle..."
     GRADLEW="gradle"
     if ! command -v gradle &> /dev/null; then

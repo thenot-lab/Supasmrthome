@@ -57,6 +57,13 @@ class APIClient: ObservableObject {
         return try await get("/arc")
     }
 
+    // MARK: - Nullclines
+
+    func getNullclines(somaA: Double = 0.25, somaB: Double = 0.5,
+                       psycheA: Double = 0.20, psycheB: Double = 0.45) async throws -> NullclineOut {
+        return try await get("/nullclines?soma_a=\(somaA)&soma_b=\(somaB)&psyche_a=\(psycheA)&psyche_b=\(psycheB)")
+    }
+
     // MARK: - Adapters
 
     func listAdapters() async throws -> [AdapterOut] {
@@ -124,7 +131,7 @@ class APIClient: ObservableObject {
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
             let body = String(data: data, encoding: .utf8) ?? ""
-            throw APIError.serverError("HTTP \(http?.statusCode ?? 0): \(body)")
+            throw APIError.serverError("HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0): \(body)")
         }
         return try decoder.decode(T.self, from: data)
     }

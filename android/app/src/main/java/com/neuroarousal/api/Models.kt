@@ -134,6 +134,30 @@ data class StateSnapshot(
     val config: StateConfig
 )
 
+data class NullclineOut(
+    val u: List<Double>,
+    @SerializedName("soma_cubic") val somaCubic: List<Double>,
+    @SerializedName("soma_linear") val somaLinear: List<Double>,
+    @SerializedName("psyche_cubic") val psycheCubic: List<Double>,
+    @SerializedName("psyche_linear") val psycheLinear: List<Double>
+)
+
+data class CharacterAppearanceOut(
+    @SerializedName("body_colour") val bodyColour: List<Int>,
+    @SerializedName("aura_colour") val auraColour: List<Int>,
+    @SerializedName("eye_colour") val eyeColour: List<Int>,
+    val expression: String,
+    @SerializedName("mouth_curve") val mouthCurve: Double,
+    @SerializedName("eye_openness") val eyeOpenness: Double,
+    @SerializedName("pupil_dilation") val pupilDilation: Double,
+    @SerializedName("aura_intensity") val auraIntensity: Double,
+    @SerializedName("particle_count") val particleCount: Int,
+    @SerializedName("particle_speed") val particleSpeed: Double,
+    @SerializedName("posture_angle") val postureAngle: Double,
+    @SerializedName("breathing_rate") val breathingRate: Double,
+    val tremor: Double
+)
+
 data class StateConfig(
     val dt: Double,
     @SerializedName("soma_a") val somaA: Double,

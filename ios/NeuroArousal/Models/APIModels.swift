@@ -95,6 +95,14 @@ struct SimulationOut: Codable {
     let arc: NarrativeArcOut?
 }
 
+struct NullclineOut: Codable {
+    let u: [Double]
+    let soma_cubic: [Double]
+    let soma_linear: [Double]
+    let psyche_cubic: [Double]
+    let psyche_linear: [Double]
+}
+
 struct ScenarioInfoOut: Codable {
     let name: String
     let description: String

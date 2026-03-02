@@ -41,6 +41,20 @@ interface NeuroArousalApi {
 
     @POST("adapters/{name}")
     suspend fun setAdapter(@Path("name") name: String): Map<String, String>
+
+    @GET("nullclines")
+    suspend fun getNullclines(
+        @Query("soma_a") somaA: Double = 0.25,
+        @Query("soma_b") somaB: Double = 0.5,
+        @Query("psyche_a") psycheA: Double = 0.20,
+        @Query("psyche_b") psycheB: Double = 0.45
+    ): NullclineOut
+
+    @GET("character/appearance")
+    suspend fun getCharacterAppearance(@Query("step") step: Int? = null): CharacterAppearanceOut
+
+    @GET("character/image")
+    suspend fun getCharacterImage(@Query("step") step: Int? = null): okhttp3.ResponseBody
 }
 
 object ApiClientFactory {

@@ -15,8 +15,6 @@ from neuro_arousal.engine import (
     pulse_stimulus,
     periodic_stimulus,
     savage_config,
-    SAVAGE_SOMA,
-    SAVAGE_PSYCHE,
 )
 from neuro_arousal.digital_soul import (
     DigitalSoul,

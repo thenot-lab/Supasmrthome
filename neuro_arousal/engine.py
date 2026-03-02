@@ -46,7 +46,6 @@ FitzHugh, R. (1961). Impulses and physiological states in theoretical models of
 
 from __future__ import annotations
 
-import dataclasses
 from dataclasses import dataclass, field
 from typing import Callable
 
