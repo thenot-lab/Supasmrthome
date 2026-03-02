@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="soma_u">#e63946</color>
+    <color name="soma_v">#f4a261</color>
+    <color name="psyche_u">#457b9d</color>
+    <color name="psyche_v">#a8dadc</color>
+    <color name="flux">#2a9d8f</color>
+    <color name="tension">#e9c46a</color>
+    <color name="climax">#ff006e</color>
+    <color name="background_dark">#1a1a2e</color>
+</resources>

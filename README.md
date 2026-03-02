@@ -137,6 +137,128 @@ python main.py --api-only --port 8000
 python -m pytest tests/ -v
 ```
 
+---
+
+## Native Mobile Apps
+
+### iOS (Non-App Store / Ad-Hoc)
+
+Full native SwiftUI app in `ios/`. Connects to the NeuroArousal API server.
+
+```
+ios/
+├── project.yml                    # xcodegen project spec
+├── ExportOptions.plist            # ad-hoc distribution config
+├── build.sh                       # build + install script
+└── NeuroArousal/
+    ├── App/NeuroArousalApp.swift   # entry point
+    ├── Models/
+    │   ├── APIModels.swift         # all Codable request/response types
+    │   └── APIClient.swift         # URLSession async API client
+    └── Views/
+        ├── ContentView.swift       # tab navigation + settings
+        ├── PresetsTab.swift        # scenario selector + adapter picker
+        ├── CustomTab.swift         # full parameter sliders + savage mode
+        ├── StateExplorerTab.swift  # step scrubber + full state display
+        ├── SimulationResultView.swift  # charts + regime + alignment
+        ├── ChartViews.swift        # Swift Charts (time series, phase, energy, tension)
+        └── AboutTab.swift          # math reference + parameters
+```
+
+**Build & Install (requires macOS with Xcode 15+):**
+
+```bash
+# 1. Install xcodegen
+brew install xcodegen
+
+# 2. Generate Xcode project and build for simulator
+cd ios/
+./build.sh              # builds for iOS Simulator
+
+# 3. Build IPA for physical device (ad-hoc)
+./build.sh device       # produces .ipa in build/ipa/
+
+# 4. Direct install on connected device
+brew install ios-deploy
+./build.sh install      # builds + deploys via USB
+```
+
+**Distribution (non-App Store):**
+- **USB**: Drag IPA onto device in Xcode (Window > Devices)
+- **Apple Configurator**: For kiosk fleet deployment
+- **OTA**: Upload IPA to Diawi/InstallOnAir for an install link
+- **TestFlight**: For beta distribution (requires Apple Developer Program)
+
+### Android (Kotlin / Jetpack Compose)
+
+Full native Kotlin app in `android/`. Produces a clickable-install APK.
+
+```
+android/
+├── build.gradle.kts               # root build config
+├── settings.gradle.kts            # project settings
+├── gradle.properties              # JVM / AndroidX config
+├── build.sh                       # build + install script
+└── app/
+    ├── build.gradle.kts           # app-level deps (Compose, Retrofit, Coil)
+    └── src/main/
+        ├── AndroidManifest.xml    # INTERNET + cleartext permissions
+        ├── java/com/neuroarousal/
+        │   ├── app/MainActivity.kt         # Compose Activity + nav
+        │   ├── api/
+        │   │   ├── Models.kt               # all Gson data classes
+        │   │   └── ApiClient.kt            # Retrofit API interface
+        │   └── ui/
+        │       ├── theme/Theme.kt          # Material 3 dark/light
+        │       ├── screens/
+        │       │   ├── MainViewModel.kt    # shared ViewModel
+        │       │   ├── PresetsScreen.kt    # scenario + adapter picker
+        │       │   ├── CustomScreen.kt     # all sliders + savage mode
+        │       │   ├── StateExplorerScreen.kt  # step scrubber + JSON
+        │       │   └── AboutScreen.kt      # math reference
+        │       └── components/
+        │           ├── LabeledSlider.kt    # reusable slider row
+        │           └── SimulationResultPanel.kt  # charts + regime + arc
+        └── res/
+            ├── values/{strings,themes,colors}.xml
+            ├── drawable/ic_launcher_foreground.xml
+            └── mipmap-hdpi/ic_launcher.xml
+```
+
+**Build & Install:**
+
+```bash
+# 1. Ensure Android SDK + Java 17 are installed
+# 2. Build debug APK
+cd android/
+./build.sh              # produces app-debug.apk
+
+# 3. Install on connected device
+./build.sh install      # builds + adb install + launches
+
+# 4. Build release APK
+./build.sh release      # produces unsigned release APK
+```
+
+**Distribution (clickable install):**
+- **USB Transfer**: Copy APK to phone > tap to install
+  (enable "Install from Unknown Sources" in Settings)
+- **QR Code**: Host APK on any web server, generate QR code to URL
+- **Email / Cloud**: Send APK as attachment or share via Drive/Dropbox
+- **ADB**: `adb install app/build/outputs/apk/debug/app-debug.apk`
+
+### Server Configuration for Mobile
+
+Both native apps connect to the NeuroArousal FastAPI backend. Configure the
+server URL in each app's Settings screen.
+
+For local development:
+- **iOS Simulator**: `http://localhost:7860`
+- **Android Emulator**: `http://10.0.2.2:7860` (maps to host localhost)
+- **Physical device on same Wi-Fi**: `http://<your-ip>:7860`
+
+---
+
 ## Deployment (Production)
 
 ### Docker (recommended for museum kiosks)
@@ -163,7 +285,7 @@ Restart=always
 WantedBy=multi-user.target
 ```
 
-### Windows (future)
+### Windows (planned)
 
 A Windows UI version using tkinter/PyQt is planned for standalone kiosk
 deployment. The API and engine modules are platform-independent.

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">NeuroArousal</string>
+    <string name="tab_presets">Presets</string>
+    <string name="tab_custom">Custom</string>
+    <string name="tab_state">State</string>
+    <string name="tab_about">About</string>
+</resources>
