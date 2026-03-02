@@ -9,6 +9,9 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.9"
+    # REQUIRED: Set your Apple Developer Team ID below.
+    # Find it at https://developer.apple.com/account → Membership Details.
+    # Example: DEVELOPMENT_TEAM: "A1B2C3D4E5"
     DEVELOPMENT_TEAM: ""
     CODE_SIGN_IDENTITY: "Apple Development"
     CODE_SIGN_STYLE: Automatic
