@@ -5,23 +5,41 @@ Provides REST endpoints for:
   * listing / describing preset scenarios
   * running simulations (preset or custom)
   * retrieving nullcline data for phase-plane plots
+  * computational state inspection at any timestep
+  * alignment scoring between SOMA and PSYCHE
+  * narrative arc decomposition (climax detection, tension curve)
+  * PEFT adapter selection and listing
+  * multimodal character image generation
 """
 
 from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Response
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from neuro_arousal.digital_soul import DigitalSoul, Regime
+from neuro_arousal.digital_soul import (
+    DigitalSoul,
+    Regime,
+    ArcPhase,
+    PEFT_ADAPTERS,
+)
 from neuro_arousal.engine import (
     CouplingParams,
+    EmotionalDriveParams,
     SimulationConfig,
     SubsystemParams,
     null_stimulus,
     pulse_stimulus,
     periodic_stimulus,
+    savage_config,
+)
+from neuro_arousal.multimodal import (
+    compute_appearance,
+    render_character,
+    appearance_to_dict,
 )
 
 # ---------------------------------------------------------------------------
@@ -32,9 +50,18 @@ app = FastAPI(
     title="NeuroArousal Exhibit API",
     description=(
         "Interactive Blyuss-Kyrychko coupled excitable system simulation "
-        "for museum demonstration."
+        "for museum demonstration.  Full state inspection, narrative arc "
+        "analysis, alignment scoring, and multimodal character generation."
     ),
-    version="1.0.0",
+    version="2.0.0",
+)
+
+# Enable CORS for mobile / cross-origin access
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 soul = DigitalSoul()
@@ -58,6 +85,12 @@ class CouplingIn(BaseModel):
     tau: float = Field(5.0, ge=0, description="Coupling delay")
 
 
+class EmotionIn(BaseModel):
+    E_u: float = Field(50.0, ge=0, le=100, description="Arousal drive 0–100")
+    E_v: float = Field(50.0, ge=0, le=100, description="Valence drive 0–100")
+    E_v0: float = Field(0.2, description="Baseline valence offset")
+
+
 class StimulusIn(BaseModel):
     kind: str = Field("none", description="'none', 'pulse', or 'periodic'")
     onset: float = Field(20.0, ge=0)
@@ -72,12 +105,15 @@ class CustomRunRequest(BaseModel):
     soma: SubsystemIn = Field(default_factory=SubsystemIn)
     psyche: SubsystemIn = Field(default_factory=SubsystemIn)
     coupling: CouplingIn = Field(default_factory=CouplingIn)
+    emotion: EmotionIn = Field(default_factory=EmotionIn)
+    savage_mode: bool = False
     ic_u1: float = 0.0
     ic_v1: float = 0.0
     ic_u2: float = 0.0
     ic_v2: float = 0.0
     soma_stimulus: StimulusIn = Field(default_factory=StimulusIn)
     psyche_stimulus: StimulusIn = Field(default_factory=StimulusIn)
+    adapter: str = "default"
 
 
 class RegimeOut(BaseModel):
@@ -90,6 +126,28 @@ class RegimeOut(BaseModel):
     description: str
 
 
+class AlignmentOut(BaseModel):
+    cross_correlation: float
+    phase_lag: float
+    coherence_index: float
+    interpretation: str
+
+
+class ArcPhaseOut(BaseModel):
+    t_start: float
+    t_end: float
+    phase: str
+
+
+class NarrativeArcOut(BaseModel):
+    phases: list[ArcPhaseOut]
+    climax_time: float
+    climax_energy: float
+    peak_spike_rate: float
+    arc_summary: str
+    tension_curve: list[float]
+
+
 class SimulationOut(BaseModel):
     time: list[float]
     u1: list[float]
@@ -100,6 +158,8 @@ class SimulationOut(BaseModel):
     psyche_energy: list[float]
     coupling_flux: list[float]
     report: RegimeOut
+    alignment: AlignmentOut | None = None
+    arc: NarrativeArcOut | None = None
 
 
 class NullclineOut(BaseModel):
@@ -120,6 +180,12 @@ class ScenarioInfoOut(BaseModel):
     tau: str
 
 
+class AdapterOut(BaseModel):
+    name: str
+    label: str
+    description: str
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -133,14 +199,36 @@ def _make_stimulus(s: StimulusIn):
 
 
 def _downsample(arr, max_points: int = 2000) -> list[float]:
-    """Downsample a numpy array to at most *max_points* for JSON transfer."""
     if len(arr) <= max_points:
         return arr.tolist()
     step = max(1, len(arr) // max_points)
     return arr[::step].tolist()
 
 
-def _results_to_out(results, report) -> SimulationOut:
+def _results_to_out(results, report, alignment=None, arc=None) -> SimulationOut:
+    alignment_out = None
+    if alignment is not None:
+        alignment_out = AlignmentOut(
+            cross_correlation=alignment.cross_correlation,
+            phase_lag=alignment.phase_lag,
+            coherence_index=alignment.coherence_index,
+            interpretation=alignment.interpretation,
+        )
+
+    arc_out = None
+    if arc is not None:
+        arc_out = NarrativeArcOut(
+            phases=[
+                ArcPhaseOut(t_start=p[0], t_end=p[1], phase=p[2].name)
+                for p in arc.phases
+            ],
+            climax_time=arc.climax_time,
+            climax_energy=arc.climax_energy,
+            peak_spike_rate=arc.peak_spike_rate,
+            arc_summary=arc.arc_summary,
+            tension_curve=_downsample(arc.tension_curve),
+        )
+
     return SimulationOut(
         time=_downsample(results["time"]),
         u1=_downsample(results["u1"]),
@@ -159,64 +247,82 @@ def _results_to_out(results, report) -> SimulationOut:
             mean_coupling_flux=round(report.mean_coupling_flux, 6),
             description=report.description,
         ),
+        alignment=alignment_out,
+        arc=arc_out,
     )
 
 
 # ---------------------------------------------------------------------------
-# Endpoints
+# Endpoints — scenarios
 # ---------------------------------------------------------------------------
 
 @app.get("/")
 def root():
     return {
         "service": "NeuroArousal Exhibit API",
+        "version": "2.0.0",
         "docs": "/docs",
         "scenarios": soul.scenario_names,
+        "adapters": list(PEFT_ADAPTERS.keys()),
     }
 
 
 @app.get("/scenarios", response_model=list[str])
 def list_scenarios():
-    """List available preset scenario keys."""
     return soul.scenario_names
 
 
 @app.get("/scenarios/{name}", response_model=ScenarioInfoOut)
 def get_scenario(name: str):
-    """Describe a preset scenario."""
     if name not in soul.scenarios:
         raise HTTPException(404, f"Unknown scenario: {name}")
     return ScenarioInfoOut(**soul.get_scenario_info(name))
 
 
+# ---------------------------------------------------------------------------
+# Endpoints — simulation
+# ---------------------------------------------------------------------------
+
 @app.post("/run/scenario/{name}", response_model=SimulationOut)
-def run_scenario(name: str):
-    """Run a preset scenario and return full time-series + report."""
+def run_scenario(name: str, adapter: str = "default"):
+    soul.set_adapter(adapter)
     try:
         results, report = soul.run_scenario(name)
     except ValueError as exc:
         raise HTTPException(404, str(exc))
-    return _results_to_out(results, report)
+    return _results_to_out(
+        results, report, soul.get_alignment(), soul.get_arc()
+    )
 
 
 @app.post("/run/custom", response_model=SimulationOut)
 def run_custom(req: CustomRunRequest):
-    """Run a simulation with fully custom parameters."""
-    config = SimulationConfig(
-        dt=req.dt,
-        t_max=req.t_max,
-        soma=SubsystemParams(
-            a=req.soma.a, epsilon=req.soma.epsilon, b=req.soma.b
-        ),
-        psyche=SubsystemParams(
-            a=req.psyche.a, epsilon=req.psyche.epsilon, b=req.psyche.b
-        ),
-        coupling=CouplingParams(
-            c12=req.coupling.c12, c21=req.coupling.c21,
-            kappa=req.coupling.kappa, theta=req.coupling.theta,
-            tau=req.coupling.tau,
-        ),
-    )
+    soul.set_adapter(req.adapter)
+
+    if req.savage_mode:
+        config = savage_config(t_max=req.t_max)
+    else:
+        config = SimulationConfig(
+            dt=req.dt,
+            t_max=req.t_max,
+            soma=SubsystemParams(
+                a=req.soma.a, epsilon=req.soma.epsilon, b=req.soma.b
+            ),
+            psyche=SubsystemParams(
+                a=req.psyche.a, epsilon=req.psyche.epsilon, b=req.psyche.b
+            ),
+            coupling=CouplingParams(
+                c12=req.coupling.c12, c21=req.coupling.c21,
+                kappa=req.coupling.kappa, theta=req.coupling.theta,
+                tau=req.coupling.tau,
+            ),
+            emotion=EmotionalDriveParams(
+                E_u=req.emotion.E_u,
+                E_v=req.emotion.E_v,
+                E_v0=req.emotion.E_v0,
+            ),
+            savage_mode=False,
+        )
     try:
         results, report = soul.run_custom(
             config=config,
@@ -226,8 +332,14 @@ def run_custom(req: CustomRunRequest):
         )
     except ValueError as exc:
         raise HTTPException(422, str(exc))
-    return _results_to_out(results, report)
+    return _results_to_out(
+        results, report, soul.get_alignment(), soul.get_arc()
+    )
 
+
+# ---------------------------------------------------------------------------
+# Endpoints — nullclines
+# ---------------------------------------------------------------------------
 
 @app.get("/nullclines", response_model=NullclineOut)
 def get_nullclines(
@@ -236,7 +348,6 @@ def get_nullclines(
     psyche_a: Annotated[float, Query(gt=0, lt=1)] = 0.20,
     psyche_b: float = 0.45,
 ):
-    """Compute nullclines for the given parameters (for phase-plane overlay)."""
     config = SimulationConfig(
         soma=SubsystemParams(a=soma_a, b=soma_b),
         psyche=SubsystemParams(a=psyche_a, b=psyche_b),
@@ -249,3 +360,112 @@ def get_nullclines(
         psyche_cubic=nc["psyche_cubic"].tolist(),
         psyche_linear=nc["psyche_linear"].tolist(),
     )
+
+
+# ---------------------------------------------------------------------------
+# Endpoints — state inspector
+# ---------------------------------------------------------------------------
+
+@app.get("/state/{step}")
+def get_state_snapshot(step: int):
+    """Return full computational state at a given integration step."""
+    snap = soul.get_state_snapshot(step)
+    if snap is None:
+        raise HTTPException(404, "No simulation has been run yet.")
+    return snap
+
+
+@app.get("/state")
+def get_state_current():
+    """Return computational state at the final step of the last run."""
+    snap = soul.get_state_snapshot()
+    if snap is None:
+        raise HTTPException(404, "No simulation has been run yet.")
+    return snap
+
+
+# ---------------------------------------------------------------------------
+# Endpoints — alignment
+# ---------------------------------------------------------------------------
+
+@app.get("/alignment", response_model=AlignmentOut)
+def get_alignment():
+    a = soul.get_alignment()
+    if a is None:
+        raise HTTPException(404, "No simulation has been run yet.")
+    return AlignmentOut(
+        cross_correlation=a.cross_correlation,
+        phase_lag=a.phase_lag,
+        coherence_index=a.coherence_index,
+        interpretation=a.interpretation,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Endpoints — narrative arc
+# ---------------------------------------------------------------------------
+
+@app.get("/arc", response_model=NarrativeArcOut)
+def get_narrative_arc():
+    arc = soul.get_arc()
+    if arc is None:
+        raise HTTPException(404, "No simulation has been run yet.")
+    return NarrativeArcOut(
+        phases=[
+            ArcPhaseOut(t_start=p[0], t_end=p[1], phase=p[2].name)
+            for p in arc.phases
+        ],
+        climax_time=arc.climax_time,
+        climax_energy=arc.climax_energy,
+        peak_spike_rate=arc.peak_spike_rate,
+        arc_summary=arc.arc_summary,
+        tension_curve=_downsample(arc.tension_curve),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Endpoints — PEFT adapters
+# ---------------------------------------------------------------------------
+
+@app.get("/adapters", response_model=list[AdapterOut])
+def list_adapters():
+    return [
+        AdapterOut(**a) for a in soul.available_adapters()
+    ]
+
+
+@app.post("/adapters/{name}")
+def set_adapter(name: str):
+    if name not in PEFT_ADAPTERS:
+        raise HTTPException(404, f"Unknown adapter: {name}")
+    a = soul.set_adapter(name)
+    return {"name": a.name, "label": a.label}
+
+
+# ---------------------------------------------------------------------------
+# Endpoints — multimodal character
+# ---------------------------------------------------------------------------
+
+@app.get("/character/appearance")
+def get_character_appearance(step: int | None = None):
+    """Get character visual parameters derived from simulation state."""
+    snap = soul.get_state_snapshot(step)
+    if snap is None:
+        raise HTTPException(404, "No simulation has been run yet.")
+    report = soul._last_report
+    regime_name = report.coupled_regime.name if report else "QUIESCENT"
+    appearance = compute_appearance(snap, regime_name)
+    return appearance_to_dict(appearance)
+
+
+@app.get("/character/image")
+def get_character_image(step: int | None = None):
+    """Render character PNG from current simulation state."""
+    snap = soul.get_state_snapshot(step)
+    if snap is None:
+        raise HTTPException(404, "No simulation has been run yet.")
+    report = soul._last_report
+    regime_name = report.coupled_regime.name if report else "QUIESCENT"
+    appearance = compute_appearance(snap, regime_name)
+    png_bytes = render_character(appearance)
+    return Response(content=png_bytes, media_type="image/png")
