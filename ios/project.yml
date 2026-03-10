@@ -1,0 +1,55 @@
+name: NeuroArousal
+options:
+  bundleIdPrefix: com.neuroarousal
+  deploymentTarget:
+    iOS: "16.0"
+  xcodeVersion: "15.0"
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    # REQUIRED: Set your Apple Developer Team ID below.
+    # Find it at https://developer.apple.com/account → Membership Details.
+    # Example: DEVELOPMENT_TEAM: "A1B2C3D4E5"
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_IDENTITY: "Apple Development"
+    CODE_SIGN_STYLE: Automatic
+    MARKETING_VERSION: "2.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+
+targets:
+  NeuroArousal:
+    type: application
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: NeuroArousal
+        type: group
+    settings:
+      base:
+        INFOPLIST_FILE: NeuroArousal/Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: com.neuroarousal.exhibit
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: true
+        IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+    info:
+      path: NeuroArousal/Info.plist
+      properties:
+        CFBundleName: NeuroArousal
+        CFBundleDisplayName: NeuroArousal
+        CFBundleShortVersionString: "2.0.0"
+        CFBundleVersion: "1"
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
