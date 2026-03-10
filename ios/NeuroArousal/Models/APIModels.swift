@@ -1,5 +1,30 @@
 import Foundation
 
+// MARK: - Auth Models
+
+struct LoginRequest: Codable {
+    let username: String
+    let password: String
+}
+
+struct RegisterRequest: Codable {
+    let username: String
+    let password: String
+    let display_name: String
+}
+
+struct TokenResponse: Codable {
+    let access_token: String
+    let token_type: String
+    let expires_in: Int
+}
+
+struct UserResponse: Codable {
+    let username: String
+    let display_name: String
+    let created_at: Double
+}
+
 // MARK: - Request Models
 
 struct SubsystemIn: Codable {

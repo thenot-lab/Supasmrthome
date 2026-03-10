@@ -16,8 +16,9 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import FastAPI, HTTPException, Query, Response
+from fastapi import Depends, FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel, Field
 
 from neuro_arousal.digital_soul import (
@@ -40,6 +41,14 @@ from neuro_arousal.multimodal import (
     compute_appearance,
     render_character,
     appearance_to_dict,
+)
+from neuro_arousal.auth import (
+    UserCreate,
+    UserOut,
+    TokenOut,
+    get_current_user,
+    register_user,
+    authenticate_user,
 )
 
 # ---------------------------------------------------------------------------
@@ -75,6 +84,35 @@ app.add_middleware(
 )
 
 soul = DigitalSoul()
+
+
+# ---------------------------------------------------------------------------
+# Auth endpoints
+# ---------------------------------------------------------------------------
+
+@app.post("/auth/register", response_model=UserOut, status_code=201)
+def auth_register(data: UserCreate):
+    """Register a new user account."""
+    return register_user(data)
+
+
+@app.post("/auth/login", response_model=TokenOut)
+def auth_login(form: OAuth2PasswordRequestForm = Depends()):
+    """Log in with username/password. Returns a bearer token."""
+    return authenticate_user(form.username, form.password)
+
+
+@app.get("/auth/me", response_model=UserOut)
+def auth_me(username: str = Depends(get_current_user)):
+    """Return the currently authenticated user's profile."""
+    from neuro_arousal.auth import _load_users
+    users = _load_users()
+    user = users[username]
+    return UserOut(
+        username=username,
+        display_name=user["display_name"],
+        created_at=user["created_at"],
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -294,7 +332,10 @@ def get_scenario(name: str):
 # ---------------------------------------------------------------------------
 
 @app.post("/run/scenario/{name}", response_model=SimulationOut)
-def run_scenario(name: str, adapter: str = "default"):
+def run_scenario(
+    name: str, adapter: str = "default",
+    _user: str = Depends(get_current_user),
+):
     soul.set_adapter(adapter)
     try:
         results, report = soul.run_scenario(name)
@@ -306,7 +347,7 @@ def run_scenario(name: str, adapter: str = "default"):
 
 
 @app.post("/run/custom", response_model=SimulationOut)
-def run_custom(req: CustomRunRequest):
+def run_custom(req: CustomRunRequest, _user: str = Depends(get_current_user)):
     soul.set_adapter(req.adapter)
 
     if req.savage_mode:
@@ -445,7 +486,7 @@ def list_adapters():
 
 
 @app.post("/adapters/{name}")
-def set_adapter(name: str):
+def set_adapter(name: str, _user: str = Depends(get_current_user)):
     if name not in PEFT_ADAPTERS:
         raise HTTPException(404, f"Unknown adapter: {name}")
     a = soul.set_adapter(name)

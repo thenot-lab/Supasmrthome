@@ -2,6 +2,26 @@ package com.neuroarousal.api
 
 import com.google.gson.annotations.SerializedName
 
+// ── Auth Models ────────────────────────────────────────────
+
+data class RegisterRequest(
+    val username: String,
+    val password: String,
+    @SerializedName("display_name") val displayName: String = ""
+)
+
+data class TokenResponse(
+    @SerializedName("access_token") val accessToken: String,
+    @SerializedName("token_type") val tokenType: String,
+    @SerializedName("expires_in") val expiresIn: Int
+)
+
+data class UserResponse(
+    val username: String,
+    @SerializedName("display_name") val displayName: String,
+    @SerializedName("created_at") val createdAt: Double
+)
+
 // ── Request Models ──────────────────────────────────────────
 
 data class SubsystemIn(

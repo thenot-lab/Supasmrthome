@@ -8,12 +8,36 @@ import pytest
 from fastapi.testclient import TestClient
 
 from neuro_arousal.api import app
+import neuro_arousal.auth as auth_mod
 
 
 @pytest.fixture(scope="module")
-def client():
+def _setup_users(tmp_path_factory):
+    """Create a users file with a test user for the whole module."""
+    users_file = tmp_path_factory.mktemp("data") / "users.json"
+    auth_mod.USERS_FILE = users_file
+    auth_mod.SECRET_KEY = "test-api-secret"
+    # Create a test user
+    auth_mod.register_user(auth_mod.UserCreate(
+        username="apitest", password="testpass123", display_name="API Tester",
+    ))
+    return users_file
+
+
+@pytest.fixture(scope="module")
+def client(_setup_users):
     """Shared test client for the module."""
     return TestClient(app)
+
+
+@pytest.fixture(scope="module")
+def auth_headers(client):
+    """Auth headers with a valid bearer token."""
+    r = client.post("/auth/login", data={
+        "username": "apitest", "password": "testpass123",
+    })
+    token = r.json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
 
 
 # ---------------------------------------------------------------------------
@@ -54,8 +78,8 @@ class TestRootEndpoint:
 # ---------------------------------------------------------------------------
 
 class TestSimulationEndpoints:
-    def test_run_scenario_resting(self, client):
-        r = client.post("/run/scenario/resting_state")
+    def test_run_scenario_resting(self, client, auth_headers):
+        r = client.post("/run/scenario/resting_state", headers=auth_headers)
         assert r.status_code == 200
         body = r.json()
         assert "time" in body
@@ -63,46 +87,46 @@ class TestSimulationEndpoints:
         assert "report" in body
         assert body["report"]["soma_regime"] == "QUIESCENT"
 
-    def test_run_scenario_with_adapter(self, client):
-        r = client.post("/run/scenario/single_soma_pulse?adapter=poetic")
+    def test_run_scenario_with_adapter(self, client, auth_headers):
+        r = client.post("/run/scenario/single_soma_pulse?adapter=poetic", headers=auth_headers)
         assert r.status_code == 200
         body = r.json()
         assert "report" in body
 
-    def test_run_scenario_404(self, client):
-        r = client.post("/run/scenario/nonexistent")
+    def test_run_scenario_404(self, client, auth_headers):
+        r = client.post("/run/scenario/nonexistent", headers=auth_headers)
         assert r.status_code == 404
 
-    def test_run_custom_defaults(self, client):
-        r = client.post("/run/custom", json={})
+    def test_run_custom_defaults(self, client, auth_headers):
+        r = client.post("/run/custom", json={}, headers=auth_headers)
         assert r.status_code == 200
         body = r.json()
         assert "time" in body
         assert "alignment" in body
         assert "arc" in body
 
-    def test_run_custom_with_params(self, client):
+    def test_run_custom_with_params(self, client, auth_headers):
         r = client.post("/run/custom", json={
             "dt": 0.05,
             "t_max": 50.0,
             "soma": {"a": 0.25, "epsilon": 0.01, "b": 0.5},
             "emotion": {"E_u": 70.0, "E_v": 30.0, "E_v0": 0.2},
             "savage_mode": False,
-        })
+        }, headers=auth_headers)
         assert r.status_code == 200
         body = r.json()
         assert len(body["time"]) > 0
 
-    def test_run_custom_savage_mode(self, client):
+    def test_run_custom_savage_mode(self, client, auth_headers):
         r = client.post("/run/custom", json={
             "savage_mode": True,
             "t_max": 50.0,
-        })
+        }, headers=auth_headers)
         assert r.status_code == 200
         body = r.json()
         assert len(body["time"]) > 0
 
-    def test_run_custom_with_stimulus(self, client):
+    def test_run_custom_with_stimulus(self, client, auth_headers):
         r = client.post("/run/custom", json={
             "t_max": 100.0,
             "soma_stimulus": {
@@ -117,21 +141,21 @@ class TestSimulationEndpoints:
                 "duration": 2.0,
                 "amplitude": 0.3,
             },
-        })
+        }, headers=auth_headers)
         assert r.status_code == 200
 
-    def test_run_custom_invalid_a(self, client):
+    def test_run_custom_invalid_a(self, client, auth_headers):
         r = client.post("/run/custom", json={
             "soma": {"a": 1.5, "epsilon": 0.01, "b": 0.5},
-        })
+        }, headers=auth_headers)
         assert r.status_code == 422
 
-    def test_run_custom_invalid_tmax(self, client):
-        r = client.post("/run/custom", json={"t_max": 0})
+    def test_run_custom_invalid_tmax(self, client, auth_headers):
+        r = client.post("/run/custom", json={"t_max": 0}, headers=auth_headers)
         assert r.status_code == 422
 
-    def test_simulation_includes_alignment(self, client):
-        r = client.post("/run/scenario/dual_oscillation")
+    def test_simulation_includes_alignment(self, client, auth_headers):
+        r = client.post("/run/scenario/dual_oscillation", headers=auth_headers)
         assert r.status_code == 200
         body = r.json()
         alignment = body.get("alignment")
@@ -139,8 +163,8 @@ class TestSimulationEndpoints:
         assert "cross_correlation" in alignment
         assert "coherence_index" in alignment
 
-    def test_simulation_includes_arc(self, client):
-        r = client.post("/run/scenario/single_soma_pulse")
+    def test_simulation_includes_arc(self, client, auth_headers):
+        r = client.post("/run/scenario/single_soma_pulse", headers=auth_headers)
         assert r.status_code == 200
         body = r.json()
         arc = body.get("arc")
@@ -195,9 +219,9 @@ class TestStateEndpoints:
         assert "u1" in body
         assert "config" in body
 
-    def test_state_at_step(self, client):
+    def test_state_at_step(self, client, auth_headers):
         # Run a scenario first
-        client.post("/run/scenario/resting_state")
+        client.post("/run/scenario/resting_state", headers=auth_headers)
         r = client.get("/state/10")
         assert r.status_code == 200
         body = r.json()
@@ -216,8 +240,8 @@ class TestStateEndpoints:
 # ---------------------------------------------------------------------------
 
 class TestAlignmentArcEndpoints:
-    def test_alignment_after_run(self, client):
-        client.post("/run/scenario/dual_oscillation")
+    def test_alignment_after_run(self, client, auth_headers):
+        client.post("/run/scenario/dual_oscillation", headers=auth_headers)
         r = client.get("/alignment")
         assert r.status_code == 200
         body = r.json()
@@ -226,8 +250,8 @@ class TestAlignmentArcEndpoints:
         assert "coherence_index" in body
         assert "interpretation" in body
 
-    def test_arc_after_run(self, client):
-        client.post("/run/scenario/single_soma_pulse")
+    def test_arc_after_run(self, client, auth_headers):
+        client.post("/run/scenario/single_soma_pulse", headers=auth_headers)
         r = client.get("/arc")
         assert r.status_code == 200
         body = r.json()
@@ -254,14 +278,14 @@ class TestAdapterEndpoints:
         assert "clinical" in names
         assert "dramatic" in names
 
-    def test_set_adapter(self, client):
-        r = client.post("/adapters/dramatic")
+    def test_set_adapter(self, client, auth_headers):
+        r = client.post("/adapters/dramatic", headers=auth_headers)
         assert r.status_code == 200
         body = r.json()
         assert body["name"] == "dramatic"
 
-    def test_set_adapter_404(self, client):
-        r = client.post("/adapters/nonexistent")
+    def test_set_adapter_404(self, client, auth_headers):
+        r = client.post("/adapters/nonexistent", headers=auth_headers)
         assert r.status_code == 404
 
 
@@ -270,8 +294,8 @@ class TestAdapterEndpoints:
 # ---------------------------------------------------------------------------
 
 class TestCharacterEndpoints:
-    def test_character_appearance(self, client):
-        client.post("/run/scenario/resting_state")
+    def test_character_appearance(self, client, auth_headers):
+        client.post("/run/scenario/resting_state", headers=auth_headers)
         r = client.get("/character/appearance")
         assert r.status_code == 200
         body = r.json()
@@ -284,8 +308,8 @@ class TestCharacterEndpoints:
         r = client.get("/character/appearance?step=5")
         assert r.status_code == 200
 
-    def test_character_image_png(self, client):
-        client.post("/run/scenario/resting_state")
+    def test_character_image_png(self, client, auth_headers):
+        client.post("/run/scenario/resting_state", headers=auth_headers)
         r = client.get("/character/image")
         assert r.status_code == 200
         assert r.headers["content-type"] == "image/png"
@@ -310,8 +334,8 @@ class TestAllScenariosRegression:
         "psyche_perturbation",
         "savage_burst",
     ])
-    def test_scenario_runs(self, client, scenario):
-        r = client.post(f"/run/scenario/{scenario}")
+    def test_scenario_runs(self, client, auth_headers, scenario):
+        r = client.post(f"/run/scenario/{scenario}", headers=auth_headers)
         assert r.status_code == 200
         body = r.json()
         assert len(body["time"]) > 0
@@ -329,11 +353,11 @@ class TestAllScenariosRegression:
 # ---------------------------------------------------------------------------
 
 class TestDownsampling:
-    def test_long_simulation_downsampled(self, client):
+    def test_long_simulation_downsampled(self, client, auth_headers):
         r = client.post("/run/custom", json={
             "t_max": 500.0,
             "dt": 0.01,
-        })
+        }, headers=auth_headers)
         assert r.status_code == 200
         body = r.json()
         # dt=0.01, t_max=500 → 50001 points; should be heavily downsampled

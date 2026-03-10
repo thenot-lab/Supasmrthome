@@ -6,16 +6,67 @@ class APIClient: ObservableObject {
     @Published var baseURL: String = "http://localhost:7860"
     @Published var isLoading = false
     @Published var errorMessage: String?
+    @Published var isAuthenticated = false
+    @Published var currentUser: UserResponse?
 
     private let session: URLSession
     private let decoder = JSONDecoder()
     private let encoder = JSONEncoder()
+    private var accessToken: String?
 
     init() {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 30
         config.timeoutIntervalForResource = 60
         self.session = URLSession(configuration: config)
+    }
+
+    // MARK: - Authentication
+
+    func register(username: String, password: String, displayName: String = "") async throws -> UserResponse {
+        let body = RegisterRequest(
+            username: username,
+            password: password,
+            display_name: displayName.isEmpty ? username : displayName
+        )
+        return try await post("/auth/register", body: body, authenticated: false)
+    }
+
+    func login(username: String, password: String) async throws -> TokenResponse {
+        // OAuth2 form login uses application/x-www-form-urlencoded
+        guard let url = URL(string: baseURL + "/auth/login") else {
+            throw APIError.invalidURL
+        }
+        isLoading = true
+        defer { isLoading = false }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        let formBody = "username=\(username)&password=\(password)"
+        request.httpBody = formBody.data(using: .utf8)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
+            let body = String(data: data, encoding: .utf8) ?? ""
+            throw APIError.serverError("HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0): \(body)")
+        }
+        let tokenResponse = try decoder.decode(TokenResponse.self, from: data)
+        self.accessToken = tokenResponse.access_token
+        self.isAuthenticated = true
+        // Fetch user profile
+        self.currentUser = try? await getMe()
+        return tokenResponse
+    }
+
+    func logout() {
+        accessToken = nil
+        isAuthenticated = false
+        currentUser = nil
+    }
+
+    func getMe() async throws -> UserResponse {
+        return try await get("/auth/me")
     }
 
     // MARK: - Scenarios
@@ -105,7 +156,12 @@ class APIClient: ObservableObject {
         isLoading = true
         defer { isLoading = false }
 
-        let (data, response) = try await session.data(from: url)
+        var request = URLRequest(url: url)
+        if let token = accessToken {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+
+        let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
             let body = String(data: data, encoding: .utf8) ?? ""
             throw APIError.serverError("HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0): \(body)")
@@ -113,7 +169,7 @@ class APIClient: ObservableObject {
         return try decoder.decode(T.self, from: data)
     }
 
-    private func post<T: Decodable, B: Encodable>(_ path: String, body: B?) async throws -> T {
+    private func post<T: Decodable, B: Encodable>(_ path: String, body: B?, authenticated: Bool = true) async throws -> T {
         guard let url = URL(string: baseURL + path) else {
             throw APIError.invalidURL
         }
@@ -123,6 +179,10 @@ class APIClient: ObservableObject {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        if authenticated, let token = accessToken {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
 
         if let body = body {
             request.httpBody = try encoder.encode(body)

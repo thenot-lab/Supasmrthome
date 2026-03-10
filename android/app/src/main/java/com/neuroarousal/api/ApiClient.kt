@@ -9,6 +9,19 @@ import java.util.concurrent.TimeUnit
 
 interface NeuroArousalApi {
 
+    @FormUrlEncoded
+    @POST("auth/login")
+    suspend fun login(
+        @Field("username") username: String,
+        @Field("password") password: String
+    ): TokenResponse
+
+    @POST("auth/register")
+    suspend fun register(@Body request: RegisterRequest): UserResponse
+
+    @GET("auth/me")
+    suspend fun getMe(): UserResponse
+
     @GET("scenarios")
     suspend fun listScenarios(): List<String>
 
@@ -59,6 +72,7 @@ interface NeuroArousalApi {
 
 object ApiClientFactory {
     private var currentBaseUrl = "http://10.0.2.2:7860/" // Android emulator -> host
+    var accessToken: String? = null
 
     fun create(baseUrl: String? = null): NeuroArousalApi {
         val url = baseUrl ?: currentBaseUrl
@@ -68,7 +82,17 @@ object ApiClientFactory {
             level = HttpLoggingInterceptor.Level.BASIC
         }
 
+        val authInterceptor = okhttp3.Interceptor { chain ->
+            val original = chain.request()
+            val builder = original.newBuilder()
+            accessToken?.let { token ->
+                builder.addHeader("Authorization", "Bearer $token")
+            }
+            chain.proceed(builder.build())
+        }
+
         val client = OkHttpClient.Builder()
+            .addInterceptor(authInterceptor)
             .addInterceptor(logging)
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
