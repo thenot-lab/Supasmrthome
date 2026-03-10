@@ -176,9 +176,14 @@ struct CustomTab: View {
             coupling: CouplingIn(c12: c12, c21: c21, kappa: kappa, theta: theta, tau: tau),
             emotion: EmotionIn(E_u: eU, E_v: eV, E_v0: 0.2),
             savage_mode: savageMode,
-            soma_stimulus: StimulusIn(kind: stimKind, onset: stimOnset, duration: stimDur,
-                                       amplitude: stimAmp, period: stimPeriod),
-            psyche_stimulus: StimulusIn(),
+            soma_stimulus: (stimTarget == "SOMA" || stimTarget == "Both")
+                ? StimulusIn(kind: stimKind, onset: stimOnset, duration: stimDur,
+                             amplitude: stimAmp, period: stimPeriod)
+                : StimulusIn(),
+            psyche_stimulus: (stimTarget == "PSYCHE" || stimTarget == "Both")
+                ? StimulusIn(kind: stimKind, onset: stimOnset, duration: stimDur,
+                             amplitude: stimAmp, period: stimPeriod)
+                : StimulusIn(),
             adapter: selectedAdapter
         )
         do {

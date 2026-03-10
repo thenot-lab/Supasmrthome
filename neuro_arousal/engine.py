@@ -171,7 +171,7 @@ class NeuroArousalEngine:
         self._validate_config()
 
         self._n_steps = int(np.ceil(self.config.t_max / self.config.dt))
-        self._delay_steps = max(1, int(round(
+        self._delay_steps = max(0, int(round(
             self.config.coupling.tau / self.config.dt
         )))
 
@@ -313,11 +313,10 @@ class NeuroArousalEngine:
 
         soma_energy = 0.5 * (u1**2 + v1**2)
         psyche_energy = 0.5 * (u2**2 + v2**2)
-        coupling_flux = np.array([
-            self.config.coupling.c12 * self._sigmoid(u2_val)
-            - self.config.coupling.c21 * self._sigmoid(u1_val)
-            for u1_val, u2_val in zip(u1, u2)
-        ])
+        coupling_flux = (
+            self.config.coupling.c12 * self._sigmoid(u2)
+            - self.config.coupling.c21 * self._sigmoid(u1)
+        )
 
         return {
             "time": t,

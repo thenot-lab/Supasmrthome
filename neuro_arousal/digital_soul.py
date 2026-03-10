@@ -383,7 +383,8 @@ def compute_alignment(
     """Compute coherence / alignment between SOMA and PSYCHE channels."""
     u1 = results["u1"]
     u2 = results["u2"]
-    dt_idx = 1  # we work in index space
+    t = results["time"]
+    dt = float(t[1] - t[0]) if len(t) > 1 else 1.0
 
     # Normalise
     u1_n = u1 - np.mean(u1)
@@ -410,7 +411,7 @@ def compute_alignment(
     # Find peak
     peak_idx = int(np.argmax(np.abs(xcorr[:n])))
     peak_val = float(xcorr[peak_idx])
-    phase_lag = float(peak_idx) * dt_idx
+    phase_lag = float(peak_idx) * dt  # lag in time units
 
     # Coherence index: abs of peak cross-correlation, clamped to [0, 1]
     coherence = min(1.0, abs(peak_val))
@@ -419,7 +420,7 @@ def compute_alignment(
         interp = (
             f"Strong alignment (coherence={coherence:.2f}). "
             f"SOMA and PSYCHE are highly synchronised with "
-            f"a phase lag of ~{phase_lag:.0f} steps."
+            f"a phase lag of ~{phase_lag:.2f} time units."
         )
     elif coherence > 0.3:
         interp = (

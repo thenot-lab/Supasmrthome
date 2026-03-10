@@ -119,7 +119,11 @@ def compute_appearance(
     return CharacterAppearance(
         body_colour=body_colour,
         aura_colour=aura_colour,
-        eye_colour=(int(100 + abs(u2) * 155), 80, int(100 + abs(u1) * 155)),
+        eye_colour=(
+            min(255, max(0, int(100 + abs(u2) * 155))),
+            80,
+            min(255, max(0, int(100 + abs(u1) * 155))),
+        ),
         expression=expression,
         mouth_curve=mouth_curve,
         eye_openness=eye_openness,

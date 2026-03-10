@@ -180,7 +180,12 @@ fun CustomScreen(vm: MainViewModel) {
                     coupling = CouplingIn(c12.toDouble(), c21.toDouble(), kappa.toDouble(), theta.toDouble(), tau.toDouble()),
                     emotion = EmotionIn(eU.toDouble(), eV.toDouble(), 0.2),
                     savageMode = savageMode,
-                    somaStimulus = StimulusIn(stimKind, stimOnset.toDouble(), stimDur.toDouble(), stimAmp.toDouble(), stimPeriod.toDouble()),
+                    somaStimulus = if (stimTarget == "SOMA" || stimTarget == "Both")
+                        StimulusIn(stimKind, stimOnset.toDouble(), stimDur.toDouble(), stimAmp.toDouble(), stimPeriod.toDouble())
+                    else StimulusIn(),
+                    psycheStimulus = if (stimTarget == "PSYCHE" || stimTarget == "Both")
+                        StimulusIn(stimKind, stimOnset.toDouble(), stimDur.toDouble(), stimAmp.toDouble(), stimPeriod.toDouble())
+                    else StimulusIn(),
                     adapter = selectedAdapter
                 )
                 vm.runCustom(req)
