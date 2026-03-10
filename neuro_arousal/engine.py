@@ -171,9 +171,9 @@ class NeuroArousalEngine:
         self._validate_config()
 
         self._n_steps = int(np.ceil(self.config.t_max / self.config.dt))
-        self._delay_steps = max(1, int(round(
+        self._delay_steps = int(round(
             self.config.coupling.tau / self.config.dt
-        )))
+        ))
 
         # Pre-allocate trajectory storage
         self.time: NDArray[np.float64] = np.linspace(
@@ -204,6 +204,8 @@ class NeuroArousalEngine:
             raise ValueError("dt must be positive")
         if cfg.t_max <= 0:
             raise ValueError("t_max must be positive")
+        if cfg.coupling.tau < 0:
+            raise ValueError("coupling.tau must be non-negative")
         for label, sub in [("soma", cfg.soma), ("psyche", cfg.psyche)]:
             if not (0 < sub.a < 1):
                 raise ValueError(f"{label}.a must be in (0, 1), got {sub.a}")
