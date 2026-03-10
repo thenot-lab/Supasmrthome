@@ -58,6 +58,33 @@ class TestEngineConstruction:
                 soma=SubsystemParams(a=1.5)
             ))
 
+    def test_zero_tau_gives_zero_delay_steps(self):
+        """tau=0 must result in instantaneous coupling (_delay_steps == 0)."""
+        cfg = SimulationConfig(coupling=CouplingParams(tau=0.0))
+        engine = NeuroArousalEngine(cfg)
+        assert engine._delay_steps == 0
+        assert engine._ring_size == 1
+
+    def test_zero_tau_runs_without_error(self):
+        """Engine with tau=0 must run to completion and return valid results."""
+        cfg = SimulationConfig(
+            t_max=50.0,
+            coupling=CouplingParams(tau=0.0),
+        )
+        engine = NeuroArousalEngine(cfg)
+        engine.set_initial_conditions(0.1, 0.0, 0.1, 0.0)
+        results = engine.run()
+        assert results["u1"].shape == results["time"].shape
+        assert np.all(np.isfinite(results["u1"]))
+        assert np.all(np.isfinite(results["u2"]))
+
+    def test_negative_tau_raises(self):
+        """Negative tau must raise a ValueError."""
+        with pytest.raises(ValueError, match="coupling.tau must be non-negative"):
+            NeuroArousalEngine(SimulationConfig(
+                coupling=CouplingParams(tau=-1.0)
+            ))
+
 
 class TestEngineRun:
     def test_resting_state_stays_near_zero(self):
