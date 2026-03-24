@@ -8,29 +8,35 @@ struct ContentView: View {
     var body: some View {
         NavigationStack {
             TabView(selection: $selectedTab) {
+                HomeTab()
+                    .tabItem {
+                        Label("Home", systemImage: "house")
+                    }
+                    .tag(0)
+
                 PresetsTab()
                     .tabItem {
                         Label("Presets", systemImage: "list.star")
                     }
-                    .tag(0)
+                    .tag(1)
 
                 CustomTab()
                     .tabItem {
                         Label("Custom", systemImage: "slider.horizontal.3")
                     }
-                    .tag(1)
+                    .tag(2)
 
                 StateExplorerTab()
                     .tabItem {
                         Label("State", systemImage: "cpu")
                     }
-                    .tag(2)
+                    .tag(3)
 
                 AboutTab()
                     .tabItem {
                         Label("About", systemImage: "info.circle")
                     }
-                    .tag(3)
+                    .tag(4)
             }
             .navigationTitle("NeuroArousal")
             .navigationBarTitleDisplayMode(.inline)

@@ -418,11 +418,61 @@ def build_ui() -> gr.Blocks:
         theme=gr.themes.Soft(),
         css=MOBILE_CSS,
     ) as demo:
-        gr.Markdown(
-            "# NeuroArousal — Coupled Excitable System\n\n"
-            "Interactive **Blyuss-Kyrychko SOMA-PSYCHE coupling** exhibit.  "
-            "Explore how physiological and cognitive arousal channels interact."
-        )
+
+        # ================================================================
+        # MAIN MENU / DASHBOARD
+        # ================================================================
+        with gr.Tab("Home"):
+            gr.Markdown(
+                "# NeuroArousal\n"
+                "### Coupled Excitable System Exhibit\n\n"
+                "Interactive **Blyuss-Kyrychko SOMA-PSYCHE coupling** simulation.  "
+                "Explore how physiological and cognitive arousal channels interact "
+                "through delay-coupled excitable dynamics."
+            )
+            with gr.Row():
+                with gr.Column(scale=1, min_width=200):
+                    gr.Markdown(
+                        "#### Quick Launch\n"
+                        "**Presets** — Run pre-configured scenarios\n\n"
+                        "**Custom** — Tune every parameter\n\n"
+                        "**State Explorer** — Inspect internals\n\n"
+                        "**About** — Math & references"
+                    )
+                with gr.Column(scale=1, min_width=200):
+                    gr.Markdown(
+                        "#### System Status\n"
+                        f"**Scenarios:** {len(soul.scenario_names)} presets loaded\n\n"
+                        f"**Adapters:** {len(PEFT_ADAPTERS)} narrative personas\n\n"
+                        f"**Engine:** Blyuss-Kyrychko DDE solver\n\n"
+                        f"**Auth:** {'Required' if __import__('neuro_arousal.auth', fromlist=['AUTH_REQUIRED']).AUTH_REQUIRED else 'Personal mode (open)'}"
+                    )
+
+            gr.Markdown("---")
+            with gr.Row():
+                quick_scenario = gr.Dropdown(
+                    choices=list(scenario_choices.keys()),
+                    value="Resting State",
+                    label="Quick Run — Pick a scenario",
+                )
+                quick_run_btn = gr.Button(
+                    "Run Now", variant="primary", size="lg",
+                )
+
+            quick_ts = gr.Plot(label="Time Series")
+            quick_regime = gr.Markdown()
+
+            def _quick_run(display_name):
+                key = scenario_choices[display_name]
+                results, report = soul.run_scenario(key)
+                regime_text = _build_regime_text(report)
+                return _plot_timeseries(results), regime_text
+
+            quick_run_btn.click(
+                fn=_quick_run,
+                inputs=[quick_scenario],
+                outputs=[quick_ts, quick_regime],
+            )
 
         # ================================================================
         # TAB 1 — Preset Scenarios

@@ -49,24 +49,30 @@ fun NeuroArousalApp() {
                 NavigationBarItem(
                     selected = selectedTab == 0,
                     onClick = { selectedTab = 0 },
-                    icon = { Icon(Icons.Default.Star, null) },
-                    label = { Text("Presets") }
+                    icon = { Icon(Icons.Default.Home, null) },
+                    label = { Text("Home") }
                 )
                 NavigationBarItem(
                     selected = selectedTab == 1,
                     onClick = { selectedTab = 1 },
-                    icon = { Icon(Icons.Default.Tune, null) },
-                    label = { Text("Custom") }
+                    icon = { Icon(Icons.Default.Star, null) },
+                    label = { Text("Presets") }
                 )
                 NavigationBarItem(
                     selected = selectedTab == 2,
                     onClick = { selectedTab = 2 },
-                    icon = { Icon(Icons.Default.Memory, null) },
-                    label = { Text("State") }
+                    icon = { Icon(Icons.Default.Tune, null) },
+                    label = { Text("Custom") }
                 )
                 NavigationBarItem(
                     selected = selectedTab == 3,
                     onClick = { selectedTab = 3 },
+                    icon = { Icon(Icons.Default.Memory, null) },
+                    label = { Text("State") }
+                )
+                NavigationBarItem(
+                    selected = selectedTab == 4,
+                    onClick = { selectedTab = 4 },
                     icon = { Icon(Icons.Default.Info, null) },
                     label = { Text("About") }
                 )
@@ -75,10 +81,11 @@ fun NeuroArousalApp() {
     ) { padding ->
         Box(modifier = Modifier.padding(padding)) {
             when (selectedTab) {
-                0 -> PresetsScreen(vm)
-                1 -> CustomScreen(vm)
-                2 -> StateExplorerScreen(vm)
-                3 -> AboutScreen()
+                0 -> HomeScreen(vm, onNavigate = { selectedTab = it })
+                1 -> PresetsScreen(vm)
+                2 -> CustomScreen(vm)
+                3 -> StateExplorerScreen(vm)
+                4 -> AboutScreen()
             }
         }
     }

@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture(autouse=True)
 def _isolated_users(tmp_path, monkeypatch):
-    """Each test gets its own empty users file."""
+    """Each test gets its own empty users file with auth enforced."""
     users_file = tmp_path / "users.json"
     monkeypatch.setenv("NEUROAROUSAL_USERS_FILE", str(users_file))
     monkeypatch.setenv("NEUROAROUSAL_SECRET_KEY", "test-secret-key-fixed")
@@ -17,6 +17,7 @@ def _isolated_users(tmp_path, monkeypatch):
     import neuro_arousal.auth as auth_mod
     auth_mod.USERS_FILE = users_file
     auth_mod.SECRET_KEY = "test-secret-key-fixed"
+    auth_mod.AUTH_REQUIRED = True  # Force auth on for auth tests
 
 
 @pytest.fixture

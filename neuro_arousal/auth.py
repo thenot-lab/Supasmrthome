@@ -3,9 +3,10 @@ Authentication module for the NeuroArousal Exhibit API.
 
 Provides JWT-based authentication with:
   * User registration and login
-  * Password hashing with bcrypt
+  * Password hashing with PBKDF2-SHA256
   * Bearer token authentication dependency
   * Simple JSON file-based user store (suitable for exhibit/kiosk use)
+  * AUTH_REQUIRED=false mode for personal / single-user deployments
 """
 
 from __future__ import annotations
@@ -29,11 +30,12 @@ import secrets
 # Configuration
 # ---------------------------------------------------------------------------
 
+AUTH_REQUIRED = os.environ.get("NEUROAROUSAL_AUTH_REQUIRED", "false").lower() in ("1", "true", "yes")
 SECRET_KEY = os.environ.get("NEUROAROUSAL_SECRET_KEY", secrets.token_hex(32))
 TOKEN_EXPIRE_SECONDS = int(os.environ.get("NEUROAROUSAL_TOKEN_EXPIRE", "3600"))
 USERS_FILE = Path(os.environ.get("NEUROAROUSAL_USERS_FILE", "users.json"))
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)
 
 
 # ---------------------------------------------------------------------------
@@ -137,8 +139,20 @@ def _save_users(users: dict) -> None:
 # Auth dependency
 # ---------------------------------------------------------------------------
 
-def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]) -> str:
-    """FastAPI dependency that returns the authenticated username."""
+def get_current_user(token: str | None = Depends(oauth2_scheme)) -> str:
+    """FastAPI dependency that returns the authenticated username.
+
+    When AUTH_REQUIRED is False (default for personal use), all requests
+    are treated as the built-in 'owner' user with no token needed.
+    """
+    if not AUTH_REQUIRED:
+        return "owner"
+    if token is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     username = _decode_token(token)
     users = _load_users()
     if username not in users:
