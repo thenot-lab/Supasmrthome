@@ -259,36 +259,177 @@ For local development:
 
 ---
 
-## Deployment (Production)
+## Deployment Runbook
+
+This section is the end-to-end operator runbook. It covers every supported
+deployment target (Docker, systemd, iOS, Android) plus environment
+configuration and troubleshooting.
+
+### Environment variables
+
+All server-side configuration is environment-driven. Defaults assume
+**personal-use / exhibit mode** (no login screen, no multi-user auth).
+
+| Variable                       | Default      | Meaning                                       |
+|--------------------------------|--------------|-----------------------------------------------|
+| `NEUROAROUSAL_AUTH_REQUIRED`   | `false`      | `true` / `1` / `yes` to enforce bearer auth   |
+| `NEUROAROUSAL_SECRET_KEY`      | random hex   | HMAC key for signing bearer tokens            |
+| `NEUROAROUSAL_TOKEN_EXPIRE`    | `3600`       | Token lifetime in seconds                     |
+| `NEUROAROUSAL_USERS_FILE`      | `users.json` | Path to the on-disk user store                |
+
+When `AUTH_REQUIRED` is `false`, every request is treated as the built-in
+`owner` user and all `/auth/*` routes still exist for later opt-in.
 
 ### Docker (recommended for museum kiosks)
 
 ```bash
+# Build the image
 docker build -t neuroarousal .
-docker run -p 7860:7860 neuroarousal
+
+# Run in personal mode with a persistent data volume
+docker run -d --name neuroarousal \
+    -p 7860:7860 \
+    -v "$(pwd)/data:/app/data" \
+    -e NEUROAROUSAL_AUTH_REQUIRED=false \
+    neuroarousal
+
+# Tail logs
+docker logs -f neuroarousal
+
+# Stop / remove
+docker stop neuroarousal && docker rm neuroarousal
 ```
 
-### Systemd service
+To enable multi-user mode, flip the env var and set a stable secret:
+
+```bash
+docker run -d --name neuroarousal \
+    -p 7860:7860 \
+    -v "$(pwd)/data:/app/data" \
+    -e NEUROAROUSAL_AUTH_REQUIRED=true \
+    -e NEUROAROUSAL_SECRET_KEY="$(openssl rand -hex 32)" \
+    -e NEUROAROUSAL_USERS_FILE=/app/data/users.json \
+    neuroarousal
+```
+
+Then bootstrap the first user:
+
+```bash
+curl -X POST http://localhost:7860/auth/register \
+    -H 'Content-Type: application/json' \
+    -d '{"username":"curator","password":"changeme","display_name":"Curator"}'
+
+curl -X POST http://localhost:7860/auth/login \
+    -d 'username=curator&password=changeme'
+# -> { "access_token": "...", "token_type": "bearer", "expires_in": 3600 }
+```
+
+### Systemd service (bare-metal Linux kiosk)
 
 ```ini
+# /etc/systemd/system/neuroarousal.service
 [Unit]
 Description=NeuroArousal Exhibit
 After=network.target
 
 [Service]
 Type=simple
+User=neuroarousal
 WorkingDirectory=/opt/neuroarousal
-ExecStart=/opt/neuroarousal/venv/bin/python main.py --port 7860
+Environment="NEUROAROUSAL_AUTH_REQUIRED=false"
+ExecStart=/opt/neuroarousal/venv/bin/python main.py --host 0.0.0.0 --port 7860
 Restart=always
+RestartSec=3
 
 [Install]
 WantedBy=multi-user.target
 ```
 
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now neuroarousal
+sudo systemctl status neuroarousal
+journalctl -u neuroarousal -f
+```
+
+### iOS deployment
+
+The native SwiftUI app in `ios/` is built with
+[xcodegen](https://github.com/yonaskolb/XcodeGen) on macOS.
+
+> **⚠️ Manual step required.** Before the first build you **must** set your
+> Apple Developer Team ID in [`ios/project.yml`](ios/project.yml) at the
+> `DEVELOPMENT_TEAM:` line. Find it at
+> <https://developer.apple.com/account> → Membership Details (e.g.
+> `A1B2C3D4E5`). This is the only human step between a clean checkout and
+> a signed iOS build.
+
+```bash
+# 1. Prerequisites
+brew install xcodegen ios-deploy
+
+# 2. Edit ios/project.yml and fill DEVELOPMENT_TEAM: "YOUR_TEAM_ID"
+
+# 3. Build for simulator
+cd ios/
+./build.sh
+
+# 4. Build signed IPA (ad-hoc) for physical device
+./build.sh device        # produces build/ipa/NeuroArousal.ipa
+
+# 5. Install via USB
+./build.sh install
+```
+
+Distribution options (non-App Store): USB via Xcode Devices window, Apple
+Configurator for kiosk fleets, Diawi / InstallOnAir OTA links, or TestFlight
+for beta.
+
+### Android deployment
+
+```bash
+# 1. Prerequisites: Android SDK 34+ and JDK 17 on PATH
+# 2. Build debug APK
+cd android/
+./build.sh                          # app-debug.apk
+
+# 3. Install on connected device
+./build.sh install                  # adb install + launch
+
+# 4. Unsigned release APK
+./build.sh release                  # app-release-unsigned.apk
+```
+
+Distribution: USB transfer + "Install from Unknown Sources", QR code to an
+HTTP-hosted APK, internal Play track, or `adb install` over Wi-Fi.
+
+### Museum-kiosk checklist
+
+- [ ] Server under systemd or Docker with `Restart=always`
+- [ ] `NEUROAROUSAL_AUTH_REQUIRED=false` for the public exhibit
+- [ ] Fullscreen browser (kiosk mode) pointed at `http://localhost:7860/ui`
+- [ ] Hardware watchdog or power schedule for unattended recovery
+- [ ] Nightly `journalctl -u neuroarousal > /var/log/neuroarousal.log` rotate
+- [ ] iOS/Android companion apps configured with the kiosk server URL
+- [ ] Docker image or venv rebuilt after every `git pull`
+
+### Troubleshooting
+
+| Symptom                                   | Fix                                                            |
+|-------------------------------------------|----------------------------------------------------------------|
+| Port 7860 already in use                  | `python main.py --port 7861` or stop the conflicting process   |
+| CORS error in mobile app                  | Add the app's origin to `CORS_ORIGINS` in `neuro_arousal/api.py` |
+| `ModuleNotFoundError: matplotlib`         | `pip install -r requirements.txt` (3.11+ required)             |
+| Bearer 401 after restart                  | `NEUROAROUSAL_SECRET_KEY` changed — set a stable value         |
+| iOS build "No signing team"               | Set `DEVELOPMENT_TEAM` in `ios/project.yml`                    |
+| Android Gradle "SDK not found"            | `export ANDROID_HOME=/opt/android-sdk`                         |
+| Gradio plots missing                      | Ensure `matplotlib.use("Agg")` — already set in `ui.py`        |
+
 ### Windows (planned)
 
-A Windows UI version using tkinter/PyQt is planned for standalone kiosk
-deployment. The API and engine modules are platform-independent.
+A standalone Windows UI using tkinter/PyQt is planned. The API and engine
+modules are already platform-independent, so until then the recommended
+Windows path is **Docker Desktop + WSL2** using the recipe above.
 
 ## License
 

@@ -23,7 +23,6 @@ import gradio as gr
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 
 from neuro_arousal.digital_soul import (
@@ -116,7 +115,8 @@ MOBILE_CSS = """
 
 def _plot_timeseries(results: dict) -> Figure:
     t = results["time"]
-    fig, axes = plt.subplots(2, 1, figsize=(10, 5), sharex=True)
+    fig = Figure(figsize=(10, 5))
+    axes = fig.subplots(2, 1, sharex=True)
     fig.suptitle("Time Series — SOMA & PSYCHE Activators", fontsize=13)
 
     axes[0].plot(t, results["u1"], color=C_SOMA_U, lw=1.2, label="u₁ (SOMA)")
@@ -135,12 +135,13 @@ def _plot_timeseries(results: dict) -> Figure:
     axes[1].legend(loc="upper right", fontsize=8)
     axes[1].grid(alpha=0.3)
 
-    plt.tight_layout()
+    fig.tight_layout()
     return fig
 
 
 def _plot_phase_planes(results: dict, nullclines: dict) -> Figure:
-    fig, axes = plt.subplots(1, 2, figsize=(10, 4.5))
+    fig = Figure(figsize=(10, 4.5))
+    axes = fig.subplots(1, 2)
     fig.suptitle("Phase-Plane Portraits", fontsize=13)
 
     u_nc = nullclines["u"]
@@ -167,13 +168,14 @@ def _plot_phase_planes(results: dict, nullclines: dict) -> Figure:
     ax.set_xlabel("u₂"); ax.set_ylabel("v₂")
     ax.legend(fontsize=7); ax.grid(alpha=0.3)
 
-    plt.tight_layout()
+    fig.tight_layout()
     return fig
 
 
 def _plot_energy_flux(results: dict) -> Figure:
     t = results["time"]
-    fig, axes = plt.subplots(2, 1, figsize=(10, 4.5), sharex=True)
+    fig = Figure(figsize=(10, 4.5))
+    axes = fig.subplots(2, 1, sharex=True)
     fig.suptitle("Energy & Coupling Flux", fontsize=13)
 
     axes[0].plot(t, results["soma_energy"], color=C_SOMA_U, lw=1,
@@ -192,20 +194,22 @@ def _plot_energy_flux(results: dict) -> Figure:
     axes[1].set_xlabel("Time")
     axes[1].grid(alpha=0.3)
 
-    plt.tight_layout()
+    fig.tight_layout()
     return fig
 
 
 def _plot_tension_arc(results: dict, arc: NarrativeArc | None) -> Figure:
     """Plot the tension curve with narrative arc phase annotations."""
     t = results["time"]
-    fig, ax = plt.subplots(figsize=(10, 3.5))
+    fig = Figure(figsize=(10, 3.5))
+    ax = fig.subplots()
     fig.suptitle("Narrative Tension Arc", fontsize=13)
 
     if arc is not None:
         ax.plot(t, arc.tension_curve, color=C_TENSION, lw=1.5, label="Tension")
         ax.axvline(arc.climax_time, color=C_CLIMAX, lw=1.5, ls="--",
                     label=f"Climax (t={arc.climax_time:.1f})")
+        ax.legend(fontsize=8)
 
         phase_colors = {
             ArcPhase.EXPOSITION: "#264653",
@@ -227,9 +231,8 @@ def _plot_tension_arc(results: dict, arc: NarrativeArc | None) -> Figure:
 
     ax.set_xlabel("Time")
     ax.set_ylabel("Tension")
-    ax.legend(fontsize=8)
     ax.grid(alpha=0.3)
-    plt.tight_layout()
+    fig.tight_layout()
     return fig
 
 
