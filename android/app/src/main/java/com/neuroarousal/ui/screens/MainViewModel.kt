@@ -38,6 +38,22 @@ class MainViewModel : ViewModel() {
     var stateSnapshot by mutableStateOf<StateSnapshot?>(null)
         private set
 
+    // Live observer
+    var liveEvents by mutableStateOf<List<LiveEventOut>>(emptyList())
+        private set
+
+    var liveCharacterBytes by mutableStateOf<ByteArray?>(null)
+        private set
+
+    var liveAnimationBytes by mutableStateOf<ByteArray?>(null)
+        private set
+
+    var liveLatestId by mutableStateOf(0)
+        private set
+
+    var liveGenerating by mutableStateOf(false)
+        private set
+
     init {
         loadInitial()
     }
@@ -106,6 +122,47 @@ class MainViewModel : ViewModel() {
             } catch (e: Exception) {
                 errorMessage = e.message
             }
+        }
+    }
+
+    // ── Live Observer ────────────────────────────────────────
+
+    fun pollLiveFeed() {
+        viewModelScope.launch {
+            try {
+                val feed = api.listLiveEvents(limit = 40, sinceId = 0)
+                val prevLatest = liveLatestId
+                liveEvents = feed.events
+                val newest = feed.events.lastOrNull()
+                if (newest != null) liveLatestId = newest.id
+                val gotNewRun = newest != null &&
+                    newest.id > prevLatest &&
+                    (newest.type == "scenario_run" || newest.type == "custom_run")
+                if (gotNewRun || liveCharacterBytes == null) {
+                    try {
+                        liveCharacterBytes = api.getCharacterImage(null).bytes()
+                    } catch (_: Exception) {
+                        // Non-fatal — simulation may not have been run yet.
+                    }
+                }
+            } catch (e: Exception) {
+                errorMessage = e.message
+            }
+        }
+    }
+
+    fun generateAnimation(scenario: String, frames: Int = 24) {
+        viewModelScope.launch {
+            liveGenerating = true
+            errorMessage = null
+            try {
+                val body = api.getLiveFrames(scenario, frames = frames)
+                liveAnimationBytes = body.bytes()
+                pollLiveFeed()
+            } catch (e: Exception) {
+                errorMessage = e.message
+            }
+            liveGenerating = false
         }
     }
 }

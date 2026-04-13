@@ -68,6 +68,23 @@ interface NeuroArousalApi {
 
     @GET("character/image")
     suspend fun getCharacterImage(@Query("step") step: Int? = null): okhttp3.ResponseBody
+
+    // --- Live Observer ---
+
+    @GET("live/events")
+    suspend fun listLiveEvents(
+        @Query("limit") limit: Int = 50,
+        @Query("since_id") sinceId: Int = 0
+    ): LiveFeedOut
+
+    @GET("live/frames/{scenario}")
+    suspend fun getLiveFrames(
+        @Path("scenario") scenario: String,
+        @Query("frames") frames: Int = 24,
+        @Query("width") width: Int = 300,
+        @Query("height") height: Int = 380,
+        @Query("duration_ms") durationMs: Int = 120
+    ): okhttp3.ResponseBody
 }
 
 object ApiClientFactory {
@@ -85,6 +102,7 @@ object ApiClientFactory {
         val authInterceptor = okhttp3.Interceptor { chain ->
             val original = chain.request()
             val builder = original.newBuilder()
+                .addHeader("X-Client", "android")
             accessToken?.let { token ->
                 builder.addHeader("Authorization", "Bearer $token")
             }

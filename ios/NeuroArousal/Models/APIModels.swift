@@ -198,3 +198,66 @@ struct StateConfig: Codable {
     let E_v: Double
     let E_v0: Double
 }
+
+// MARK: - Live Observer Models
+
+struct LiveEventOut: Codable, Identifiable {
+    let id: Int
+    let timestamp: Double
+    let type: String
+    let source: String
+    let summary: String
+    let detail: [String: AnyCodable]
+}
+
+struct LiveFeedOut: Codable {
+    let events: [LiveEventOut]
+    let subscriber_count: Int
+    let latest_id: Int
+}
+
+/// Minimal type-erased JSON value so the heterogeneous `detail` dict in
+/// LiveEventOut can round-trip without a fixed schema.
+struct AnyCodable: Codable {
+    let value: Any
+
+    init(_ value: Any) { self.value = value }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        if c.decodeNil() { self.value = NSNull() }
+        else if let b = try? c.decode(Bool.self) { self.value = b }
+        else if let i = try? c.decode(Int.self) { self.value = i }
+        else if let d = try? c.decode(Double.self) { self.value = d }
+        else if let s = try? c.decode(String.self) { self.value = s }
+        else if let arr = try? c.decode([AnyCodable].self) {
+            self.value = arr.map { $0.value }
+        } else if let obj = try? c.decode([String: AnyCodable].self) {
+            self.value = obj.mapValues { $0.value }
+        } else {
+            self.value = NSNull()
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        switch value {
+        case is NSNull: try c.encodeNil()
+        case let b as Bool: try c.encode(b)
+        case let i as Int: try c.encode(i)
+        case let d as Double: try c.encode(d)
+        case let s as String: try c.encode(s)
+        default: try c.encodeNil()
+        }
+    }
+
+    var stringValue: String {
+        switch value {
+        case let s as String: return s
+        case let i as Int: return String(i)
+        case let d as Double: return String(format: "%.4g", d)
+        case let b as Bool: return b ? "true" : "false"
+        default: return ""
+        }
+    }
+}

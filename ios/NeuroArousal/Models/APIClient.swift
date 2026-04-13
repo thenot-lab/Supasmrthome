@@ -140,7 +140,28 @@ class APIClient: ObservableObject {
         guard let url = URL(string: baseURL + path) else {
             throw APIError.invalidURL
         }
-        let (data, response) = try await session.data(from: url)
+        var request = URLRequest(url: url)
+        request.setValue("ios", forHTTPHeaderField: "X-Client")
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
+            throw APIError.serverError("HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0)")
+        }
+        return data
+    }
+
+    // MARK: - Live Observer
+
+    func listLiveEvents(limit: Int = 50, sinceId: Int = 0) async throws -> LiveFeedOut {
+        return try await get("/live/events?limit=\(limit)&since_id=\(sinceId)")
+    }
+
+    func getLiveFrames(scenario: String, frames: Int = 24) async throws -> Data {
+        guard let url = URL(string: baseURL + "/live/frames/\(scenario)?frames=\(frames)") else {
+            throw APIError.invalidURL
+        }
+        var request = URLRequest(url: url)
+        request.setValue("ios", forHTTPHeaderField: "X-Client")
+        let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
             throw APIError.serverError("HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0)")
         }
@@ -157,6 +178,7 @@ class APIClient: ObservableObject {
         defer { isLoading = false }
 
         var request = URLRequest(url: url)
+        request.setValue("ios", forHTTPHeaderField: "X-Client")
         if let token = accessToken {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
@@ -179,6 +201,7 @@ class APIClient: ObservableObject {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("ios", forHTTPHeaderField: "X-Client")
 
         if authenticated, let token = accessToken {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")

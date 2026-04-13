@@ -48,6 +48,11 @@ from neuro_arousal.multimodal import (
     render_character,
     _HAS_PIL,
 )
+from neuro_arousal.live import (
+    bus as live_bus,
+    frames_to_gif,
+    generate_scenario_frames,
+)
 
 # ---------------------------------------------------------------------------
 # Shared state
@@ -254,8 +259,8 @@ def _render_character_image(snap: dict | None, regime: str) -> np.ndarray | None
 # ---------------------------------------------------------------------------
 
 def run_preset(scenario_key: str, adapter_name: str):
-    soul.set_adapter(adapter_name)
-    results, report = soul.run_scenario(scenario_key)
+    soul.set_adapter(adapter_name, source="gradio")
+    results, report = soul.run_scenario(scenario_key, source="gradio")
     nc = soul.get_nullclines()
     alignment = soul.get_alignment()
     arc = soul.get_arc()
@@ -300,7 +305,7 @@ def run_custom(
     adapter_name,
     stim_kind, stim_target, stim_onset, stim_dur, stim_amp, stim_period,
 ):
-    soul.set_adapter(adapter_name)
+    soul.set_adapter(adapter_name, source="gradio")
 
     if savage_mode:
         config = savage_config(t_max=float(t_max))
@@ -336,7 +341,9 @@ def run_custom(
     I1 = stim_fn if stim_target in ("SOMA", "Both") else null_stimulus
     I2 = stim_fn if stim_target in ("PSYCHE", "Both") else null_stimulus
 
-    results, report = soul.run_custom(config, I1_func=I1, I2_func=I2)
+    results, report = soul.run_custom(
+        config, I1_func=I1, I2_func=I2, source="gradio",
+    )
     nc = soul.get_nullclines(config)
     alignment = soul.get_alignment()
     arc = soul.get_arc()
@@ -440,6 +447,7 @@ def build_ui() -> gr.Blocks:
                         "**Presets** — Run pre-configured scenarios\n\n"
                         "**Custom** — Tune every parameter\n\n"
                         "**State Explorer** — Inspect internals\n\n"
+                        "**Live Observer** — Watch the exhibit in real time\n\n"
                         "**About** — Math & references"
                     )
                 with gr.Column(scale=1, min_width=200):
@@ -467,7 +475,7 @@ def build_ui() -> gr.Blocks:
 
             def _quick_run(display_name):
                 key = scenario_choices[display_name]
-                results, report = soul.run_scenario(key)
+                results, report = soul.run_scenario(key, source="gradio")
                 regime_text = _build_regime_text(report)
                 return _plot_timeseries(results), regime_text
 
@@ -727,7 +735,118 @@ def build_ui() -> gr.Blocks:
             )
 
         # ================================================================
-        # TAB 4 — About
+        # TAB 4 — Live Observer
+        # ================================================================
+        with gr.Tab("Live Observer"):
+            gr.Markdown(
+                "### Live Observer\n\n"
+                "Watch the exhibit in real time. The feed below streams "
+                "simulation events from every client (Gradio, API, iOS, "
+                "Android) and the character re-renders whenever a run "
+                "completes. Use **Generate Animation** to produce an "
+                "animated GIF of a scenario for a second-screen display."
+            )
+
+            with gr.Row():
+                live_iframe = gr.HTML(
+                    "<iframe src=\"/live/observer\" "
+                    "style=\"width:100%;height:640px;border:0;"
+                    "border-radius:12px;background:#0f0f1a\"></iframe>"
+                )
+
+            gr.Markdown("---")
+            gr.Markdown("### Generate Animation (Video-style GIF)")
+            with gr.Row():
+                anim_scenario = gr.Dropdown(
+                    choices=list(scenario_choices.keys()),
+                    value="Savage Burst",
+                    label="Scenario",
+                )
+                anim_frames = gr.Slider(
+                    8, 48, 24, step=1, label="Frames",
+                )
+                anim_duration = gr.Slider(
+                    40, 400, 120, step=10, label="Frame duration (ms)",
+                )
+                anim_btn = gr.Button(
+                    "Generate Animation", variant="primary", size="lg",
+                )
+
+            anim_gif = gr.Image(
+                label="Animated Character",
+                type="filepath",
+                height=420,
+            )
+            anim_meta = gr.Markdown()
+
+            def _gen_animation(display_name, frames, duration):
+                import tempfile, os
+                key = scenario_choices[display_name]
+                png_frames, meta = generate_scenario_frames(
+                    soul, scenario_name=key, frame_count=int(frames),
+                )
+                gif = frames_to_gif(png_frames, duration_ms=int(duration))
+                if gif is None and png_frames:
+                    # Pillow unavailable — fall back to last frame PNG.
+                    suffix = ".png"
+                    payload = png_frames[-1]
+                elif gif is None:
+                    return None, "**No frames produced.**"
+                else:
+                    suffix = ".gif"
+                    payload = gif
+                tmp = tempfile.NamedTemporaryFile(
+                    delete=False, suffix=suffix,
+                )
+                tmp.write(payload)
+                tmp.close()
+                live_bus.publish(
+                    type="frames_generated",
+                    summary=f"Rendered {meta['frames']} frames for "
+                            f"'{meta['scenario']}'",
+                    source="gradio",
+                    detail=meta,
+                )
+                md = (
+                    f"**Scenario:** {meta['scenario']}  \n"
+                    f"**Regime:** {meta.get('regime', '—')}  \n"
+                    f"**Frames:** {meta['frames']}  \n"
+                    f"**Total steps:** {meta['total_steps']}  \n"
+                    f"**SOMA spikes:** {meta['soma_spikes']}  \n"
+                    f"**PSYCHE spikes:** {meta['psyche_spikes']}"
+                )
+                return tmp.name, md
+
+            anim_btn.click(
+                fn=_gen_animation,
+                inputs=[anim_scenario, anim_frames, anim_duration],
+                outputs=[anim_gif, anim_meta],
+            )
+
+            gr.Markdown("---")
+            gr.Markdown("### Recent Activity (snapshot)")
+            activity_md = gr.Markdown()
+            refresh_btn = gr.Button("Refresh feed", size="sm")
+
+            def _refresh_activity():
+                import datetime as _dt
+                events = live_bus.recent(limit=15)
+                if not events:
+                    return "_No activity yet. Run a scenario from any tab._"
+                lines = ["| Time | Source | Event |",
+                         "|------|--------|-------|"]
+                for e in reversed(events):
+                    ts = _dt.datetime.fromtimestamp(e.timestamp) \
+                        .strftime("%H:%M:%S")
+                    lines.append(
+                        f"| {ts} | {e.source} | {e.summary} |"
+                    )
+                return "\n".join(lines)
+
+            refresh_btn.click(fn=_refresh_activity, outputs=[activity_md])
+
+        # ================================================================
+        # TAB 5 — About
         # ================================================================
         with gr.Tab("About"):
             gr.Markdown(

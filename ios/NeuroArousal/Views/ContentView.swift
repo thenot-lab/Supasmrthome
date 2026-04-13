@@ -32,11 +32,17 @@ struct ContentView: View {
                     }
                     .tag(3)
 
+                LiveTab()
+                    .tabItem {
+                        Label("Live", systemImage: "eye")
+                    }
+                    .tag(4)
+
                 AboutTab()
                     .tabItem {
                         Label("About", systemImage: "info.circle")
                     }
-                    .tag(4)
+                    .tag(5)
             }
             .navigationTitle("NeuroArousal")
             .navigationBarTitleDisplayMode(.inline)

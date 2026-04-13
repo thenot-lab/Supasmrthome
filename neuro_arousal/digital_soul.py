@@ -31,6 +31,7 @@ from neuro_arousal.engine import (
     pulse_stimulus,
     savage_config,
 )
+from neuro_arousal.live import bus as _live_bus
 
 
 # ---------------------------------------------------------------------------
@@ -566,10 +567,22 @@ class DigitalSoul:
 
     # ----- PEFT adapter -----
 
-    def set_adapter(self, name: str) -> PEFTAdapter:
+    def set_adapter(self, name: str, source: str = "internal") -> PEFTAdapter:
+        previous = getattr(self, "_adapter", None)
         if name not in PEFT_ADAPTERS:
             name = "default"
         self._adapter = PEFT_ADAPTERS[name]
+        if previous is None or previous.name != self._adapter.name:
+            _live_bus.publish(
+                type="adapter_change",
+                summary=f"Adapter set to '{self._adapter.label}'",
+                source=source,
+                detail={
+                    "adapter": self._adapter.name,
+                    "label": self._adapter.label,
+                    "previous": previous.name if previous else None,
+                },
+            )
         return self._adapter
 
     @property
@@ -592,9 +605,13 @@ class DigitalSoul:
     # ----- run preset -----
 
     def run_scenario(
-        self, name: str
+        self, name: str, source: str = "internal",
     ) -> tuple[dict[str, NDArray[np.float64]], RegimeReport]:
-        """Run a named preset scenario and return (results, report)."""
+        """Run a named preset scenario and return (results, report).
+
+        `source` labels the originating client ("api", "gradio", "ios",
+        "android", "internal") for the live observer event feed.
+        """
         if name not in self.scenarios:
             raise ValueError(
                 f"Unknown scenario '{name}'. "
@@ -609,6 +626,22 @@ class DigitalSoul:
         )
         report = self._analyse(results)
         self._store(engine, results, sc.config, report)
+        _live_bus.publish(
+            type="scenario_run",
+            summary=f"Ran preset '{sc.name}' → {report.coupled_regime.name}",
+            source=source,
+            detail={
+                "scenario": name,
+                "scenario_label": sc.name,
+                "adapter": self._adapter.name,
+                "coupled_regime": report.coupled_regime.name,
+                "soma_regime": report.soma_regime.name,
+                "psyche_regime": report.psyche_regime.name,
+                "soma_spikes": report.soma_spike_count,
+                "psyche_spikes": report.psyche_spike_count,
+                "mean_flux": round(report.mean_coupling_flux, 6),
+            },
+        )
         return results, report
 
     # ----- run custom -----
@@ -619,6 +652,7 @@ class DigitalSoul:
         ic: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),
         I1_func: Callable[[float], float] = null_stimulus,
         I2_func: Callable[[float], float] = null_stimulus,
+        source: str = "internal",
     ) -> tuple[dict[str, NDArray[np.float64]], RegimeReport]:
         """Run with fully custom parameters and return (results, report)."""
         engine = NeuroArousalEngine(config)
@@ -626,6 +660,24 @@ class DigitalSoul:
         results = engine.run(I1_func, I2_func)
         report = self._analyse(results)
         self._store(engine, results, config, report)
+        _live_bus.publish(
+            type="custom_run",
+            summary=f"Ran custom simulation → {report.coupled_regime.name}",
+            source=source,
+            detail={
+                "adapter": self._adapter.name,
+                "coupled_regime": report.coupled_regime.name,
+                "soma_regime": report.soma_regime.name,
+                "psyche_regime": report.psyche_regime.name,
+                "soma_spikes": report.soma_spike_count,
+                "psyche_spikes": report.psyche_spike_count,
+                "mean_flux": round(report.mean_coupling_flux, 6),
+                "t_max": config.t_max,
+                "savage_mode": config.savage_mode,
+                "E_u": config.emotion.E_u,
+                "E_v": config.emotion.E_v,
+            },
+        )
         return results, report
 
     # ----- accessors for last-run computed data -----

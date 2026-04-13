@@ -73,6 +73,12 @@ fun NeuroArousalApp() {
                 NavigationBarItem(
                     selected = selectedTab == 4,
                     onClick = { selectedTab = 4 },
+                    icon = { Icon(Icons.Default.Visibility, null) },
+                    label = { Text("Live") }
+                )
+                NavigationBarItem(
+                    selected = selectedTab == 5,
+                    onClick = { selectedTab = 5 },
                     icon = { Icon(Icons.Default.Info, null) },
                     label = { Text("About") }
                 )
@@ -85,7 +91,8 @@ fun NeuroArousalApp() {
                 1 -> PresetsScreen(vm)
                 2 -> CustomScreen(vm)
                 3 -> StateExplorerScreen(vm)
-                4 -> AboutScreen()
+                4 -> LiveScreen(vm)
+                5 -> AboutScreen()
             }
         }
     }

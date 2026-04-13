@@ -96,6 +96,8 @@ struct HomeTab: View {
                                 desc: "Tune every parameter of the coupled system")
                         NavHint(icon: "cpu", title: "State Explorer",
                                 desc: "Scrub through integration steps, inspect internals")
+                        NavHint(icon: "eye", title: "Live Observer",
+                                desc: "Watch the exhibit react to every client in real time")
                         NavHint(icon: "info.circle", title: "About",
                                 desc: "Mathematical background and references")
                     }

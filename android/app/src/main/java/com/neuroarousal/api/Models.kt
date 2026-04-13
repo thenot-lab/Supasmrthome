@@ -195,3 +195,20 @@ data class StateConfig(
     @SerializedName("E_v") val eV: Double,
     @SerializedName("E_v0") val eV0: Double
 )
+
+// ── Live Observer Models ───────────────────────────────────
+
+data class LiveEventOut(
+    val id: Int,
+    val timestamp: Double,
+    val type: String,
+    val source: String,
+    val summary: String,
+    val detail: Map<String, Any?> = emptyMap()
+)
+
+data class LiveFeedOut(
+    val events: List<LiveEventOut>,
+    @SerializedName("subscriber_count") val subscriberCount: Int,
+    @SerializedName("latest_id") val latestId: Int
+)

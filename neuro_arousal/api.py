@@ -14,10 +14,13 @@ Provides REST endpoints for:
 
 from __future__ import annotations
 
+import asyncio
+import json
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel, Field
 
@@ -41,6 +44,11 @@ from neuro_arousal.multimodal import (
     compute_appearance,
     render_character,
     appearance_to_dict,
+)
+from neuro_arousal.live import (
+    bus as live_bus,
+    frames_to_gif,
+    generate_scenario_frames,
 )
 from neuro_arousal.auth import (
     UserCreate,
@@ -331,14 +339,26 @@ def get_scenario(name: str):
 # Endpoints — simulation
 # ---------------------------------------------------------------------------
 
+def _resolve_source(x_client: str | None) -> str:
+    """Map the X-Client header to a normalised source label for the event bus."""
+    if not x_client:
+        return "api"
+    c = x_client.strip().lower()
+    if c in ("gradio", "ios", "android", "api", "internal", "observer"):
+        return c
+    return "api"
+
+
 @app.post("/run/scenario/{name}", response_model=SimulationOut)
 def run_scenario(
     name: str, adapter: str = "default",
     _user: str = Depends(get_current_user),
+    x_client: str | None = Header(default=None, alias="X-Client"),
 ):
-    soul.set_adapter(adapter)
+    source = _resolve_source(x_client)
+    soul.set_adapter(adapter, source=source)
     try:
-        results, report = soul.run_scenario(name)
+        results, report = soul.run_scenario(name, source=source)
     except ValueError as exc:
         raise HTTPException(404, str(exc))
     return _results_to_out(
@@ -347,8 +367,13 @@ def run_scenario(
 
 
 @app.post("/run/custom", response_model=SimulationOut)
-def run_custom(req: CustomRunRequest, _user: str = Depends(get_current_user)):
-    soul.set_adapter(req.adapter)
+def run_custom(
+    req: CustomRunRequest,
+    _user: str = Depends(get_current_user),
+    x_client: str | None = Header(default=None, alias="X-Client"),
+):
+    source = _resolve_source(x_client)
+    soul.set_adapter(req.adapter, source=source)
 
     if req.savage_mode:
         config = savage_config(t_max=req.t_max)
@@ -380,6 +405,7 @@ def run_custom(req: CustomRunRequest, _user: str = Depends(get_current_user)):
             ic=(req.ic_u1, req.ic_v1, req.ic_u2, req.ic_v2),
             I1_func=_make_stimulus(req.soma_stimulus),
             I2_func=_make_stimulus(req.psyche_stimulus),
+            source=source,
         )
     except ValueError as exc:
         raise HTTPException(422, str(exc))
@@ -486,10 +512,14 @@ def list_adapters():
 
 
 @app.post("/adapters/{name}")
-def set_adapter(name: str, _user: str = Depends(get_current_user)):
+def set_adapter(
+    name: str,
+    _user: str = Depends(get_current_user),
+    x_client: str | None = Header(default=None, alias="X-Client"),
+):
     if name not in PEFT_ADAPTERS:
         raise HTTPException(404, f"Unknown adapter: {name}")
-    a = soul.set_adapter(name)
+    a = soul.set_adapter(name, source=_resolve_source(x_client))
     return {"name": a.name, "label": a.label}
 
 
@@ -519,4 +549,339 @@ def get_character_image(step: int | None = None):
     regime_name = report.coupled_regime.name if report else "QUIESCENT"
     appearance = compute_appearance(snap, regime_name)
     png_bytes = render_character(appearance)
-    return Response(content=png_bytes, media_type="image/png")
+    return Response(
+        content=png_bytes,
+        media_type="image/png",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Endpoints — Live Observer
+# ---------------------------------------------------------------------------
+
+class LiveEventOut(BaseModel):
+    id: int
+    timestamp: float
+    type: str
+    source: str
+    summary: str
+    detail: dict
+
+
+class LiveFeedOut(BaseModel):
+    events: list[LiveEventOut]
+    subscriber_count: int
+    latest_id: int
+
+
+@app.get("/live/events", response_model=LiveFeedOut)
+def live_events(
+    limit: int = Query(50, ge=1, le=200),
+    since_id: int = Query(0, ge=0),
+):
+    """Poll-based activity feed of recent simulation events.
+
+    Read-only and unauthenticated so a passive observer can watch the
+    exhibit without needing credentials. Clients can pass `since_id`
+    for efficient incremental polling.
+    """
+    events = live_bus.recent(limit=limit, since_id=since_id)
+    latest = live_bus.latest()
+    return LiveFeedOut(
+        events=[LiveEventOut(**e.to_dict()) for e in events],
+        subscriber_count=live_bus.subscriber_count,
+        latest_id=latest.id if latest else 0,
+    )
+
+
+@app.get("/live/stream")
+async def live_stream(request: Request):
+    """Server-Sent Events stream of live observer events.
+
+    Each event is emitted as `data: <json>\\n\\n`. A heartbeat comment
+    is sent every 15 seconds to keep intermediate proxies from closing
+    the connection. Unauthenticated for observer use.
+    """
+    queue = live_bus.subscribe()
+
+    async def event_generator():
+        try:
+            # Send a small init event so clients know the stream is alive.
+            init = {
+                "type": "stream_opened",
+                "summary": "Live observer stream connected",
+                "timestamp": __import__("time").time(),
+            }
+            yield f"event: open\ndata: {json.dumps(init)}\n\n"
+
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    evt = await asyncio.wait_for(queue.get(), timeout=15.0)
+                    yield f"data: {json.dumps(evt.to_dict())}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": heartbeat\n\n"
+        finally:
+            live_bus.unsubscribe(queue)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-store",
+            "X-Accel-Buffering": "no",  # disable nginx buffering if present
+            "Connection": "keep-alive",
+        },
+    )
+
+
+@app.get("/live/frames/{scenario}")
+def live_frames(
+    scenario: str,
+    frames: int = Query(24, ge=2, le=60),
+    width: int = Query(300, ge=100, le=800),
+    height: int = Query(380, ge=100, le=1000),
+    duration_ms: int = Query(120, ge=20, le=1000),
+    x_client: str | None = Header(default=None, alias="X-Client"),
+):
+    """Run a scenario and return an animated GIF of the character across time.
+
+    This is the "video generation" path — each frame is a procedural render
+    of the character at an evenly-spaced simulation step. Observers can
+    embed the returned GIF in any `<img>` tag.
+    """
+    if scenario not in soul.scenarios:
+        raise HTTPException(404, f"Unknown scenario: {scenario}")
+    source = _resolve_source(x_client)
+    soul.set_adapter(soul.adapter.name, source=source)
+    png_frames, meta = generate_scenario_frames(
+        soul,
+        scenario_name=scenario,
+        frame_count=frames,
+        frame_width=width,
+        frame_height=height,
+    )
+    gif = frames_to_gif(png_frames, duration_ms=duration_ms)
+    if gif is None:
+        # Fallback: return the last rendered frame as a static PNG so the
+        # caller always gets an image back.
+        if not png_frames:
+            raise HTTPException(500, "Frame generation produced no output.")
+        return Response(
+            content=png_frames[-1],
+            media_type="image/png",
+            headers={
+                "Cache-Control": "no-store",
+                "X-Live-Frames-Meta": json.dumps(meta),
+            },
+        )
+    live_bus.publish(
+        type="frames_generated",
+        summary=f"Rendered {meta['frames']} frames for '{meta['scenario']}'",
+        source=source,
+        detail=meta,
+    )
+    return Response(
+        content=gif,
+        media_type="image/gif",
+        headers={
+            "Cache-Control": "no-store",
+            "X-Live-Frames-Meta": json.dumps(meta),
+        },
+    )
+
+
+@app.get("/live/observer", response_class=HTMLResponse)
+def live_observer():
+    """Standalone HTML observer page — zero-config live feed for a second screen.
+
+    Shows the current character, the latest simulation result, and an
+    activity feed that updates in real time via the SSE stream. Designed
+    to be opened on a curator's phone or a second kiosk display.
+    """
+    return HTMLResponse(_OBSERVER_HTML)
+
+
+_OBSERVER_HTML = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>NeuroArousal — Live Observer</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0f0f1a;
+    --panel: #1a1a2e;
+    --ink: #e7e7f2;
+    --muted: #8c8ca5;
+    --accent: #ff006e;
+    --ok: #4caf50;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro", "Segoe UI",
+                 Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    padding: 16px;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+  }
+  h1 { margin: 0; font-size: 1.2rem; }
+  .status {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85rem;
+    color: var(--muted);
+  }
+  .dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--muted);
+    box-shadow: 0 0 8px currentColor;
+  }
+  .dot.live { background: var(--ok); }
+  .grid {
+    display: grid;
+    grid-template-columns: minmax(280px, 1fr) 1fr;
+    gap: 16px;
+  }
+  @media (max-width: 720px) {
+    .grid { grid-template-columns: 1fr; }
+  }
+  .panel {
+    background: var(--panel);
+    border-radius: 12px;
+    padding: 16px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.25);
+  }
+  .panel h2 {
+    margin: 0 0 12px 0;
+    font-size: 0.95rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  #character {
+    width: 100%; max-width: 360px; height: auto;
+    border-radius: 8px;
+    display: block;
+    margin: 0 auto;
+    background: #000;
+  }
+  .regime {
+    margin-top: 12px;
+    font-size: 1.1rem;
+    font-weight: 600;
+    text-align: center;
+  }
+  .regime .label { color: var(--muted); font-weight: 400; font-size: 0.85rem; }
+  ul#feed {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    max-height: 60vh;
+    overflow-y: auto;
+  }
+  ul#feed li {
+    padding: 10px 12px;
+    border-left: 3px solid var(--accent);
+    margin-bottom: 8px;
+    background: rgba(255,255,255,0.03);
+    border-radius: 0 8px 8px 0;
+    font-size: 0.9rem;
+  }
+  ul#feed li .meta {
+    display: block;
+    color: var(--muted);
+    font-size: 0.75rem;
+    margin-top: 4px;
+  }
+</style>
+</head>
+<body>
+  <header>
+    <h1>NeuroArousal — Live Observer</h1>
+    <span class="status"><span class="dot" id="dot"></span><span id="stat">Connecting...</span></span>
+  </header>
+  <div class="grid">
+    <section class="panel">
+      <h2>Character</h2>
+      <img id="character" alt="Character visualisation" />
+      <div class="regime">
+        <span class="label">Coupled regime</span><br/>
+        <span id="regime">—</span>
+      </div>
+    </section>
+    <section class="panel">
+      <h2>Activity feed</h2>
+      <ul id="feed"></ul>
+    </section>
+  </div>
+<script>
+(function(){
+  var img = document.getElementById("character");
+  var feed = document.getElementById("feed");
+  var regime = document.getElementById("regime");
+  var stat = document.getElementById("stat");
+  var dot = document.getElementById("dot");
+
+  function refreshCharacter() {
+    img.src = "/character/image?t=" + Date.now();
+  }
+
+  function addEvent(evt) {
+    var li = document.createElement("li");
+    var d = new Date((evt.timestamp || Date.now()/1000) * 1000);
+    li.innerHTML =
+      "<strong>" + (evt.summary || evt.type || "event") + "</strong>" +
+      "<span class=\\"meta\\">" + d.toLocaleTimeString() +
+      " · " + (evt.source || "internal") + "</span>";
+    feed.insertBefore(li, feed.firstChild);
+    while (feed.children.length > 30) feed.removeChild(feed.lastChild);
+    if (evt.detail && evt.detail.coupled_regime) {
+      regime.textContent = evt.detail.coupled_regime;
+    }
+    if (evt.type === "scenario_run" || evt.type === "custom_run") {
+      refreshCharacter();
+    }
+  }
+
+  // Prime the feed with recent history.
+  fetch("/live/events?limit=20").then(function(r){ return r.json(); })
+    .then(function(data){
+      (data.events || []).forEach(addEvent);
+      refreshCharacter();
+    });
+
+  // Open the SSE stream for live updates.
+  try {
+    var es = new EventSource("/live/stream");
+    es.addEventListener("open", function(){
+      stat.textContent = "Live"; dot.classList.add("live");
+    });
+    es.onmessage = function(e){
+      try { addEvent(JSON.parse(e.data)); } catch (err) {}
+    };
+    es.onerror = function(){
+      stat.textContent = "Reconnecting..."; dot.classList.remove("live");
+    };
+  } catch (e) {
+    stat.textContent = "SSE unavailable";
+  }
+
+  // Safety: poll every 5s for character refresh even if no events fired.
+  setInterval(refreshCharacter, 5000);
+})();
+</script>
+</body>
+</html>
+"""

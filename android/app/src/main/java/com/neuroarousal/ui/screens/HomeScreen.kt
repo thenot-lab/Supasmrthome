@@ -132,7 +132,9 @@ fun HomeScreen(vm: MainViewModel, onNavigate: (Int) -> Unit = {}) {
                 NavItem(Icons.Default.Star, "Presets", "Run pre-configured scenarios") { onNavigate(1) }
                 NavItem(Icons.Default.Tune, "Custom", "Tune every parameter") { onNavigate(2) }
                 NavItem(Icons.Default.Memory, "State Explorer", "Inspect integration steps") { onNavigate(3) }
-                NavItem(Icons.Default.Info, "About", "Math & references") { onNavigate(4) }
+                NavItem(Icons.Default.Visibility, "Live Observer",
+                    "Watch the exhibit react to every client in real time") { onNavigate(4) }
+                NavItem(Icons.Default.Info, "About", "Math & references") { onNavigate(5) }
             }
         }
     }
