@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from typing import Annotated
 
+import threading
+
 from fastapi import Depends, FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
@@ -38,6 +40,7 @@ from neuro_arousal.engine import (
     savage_config,
 )
 from neuro_arousal.multimodal import (
+    _HAS_PIL,
     compute_appearance,
     render_character,
     appearance_to_dict,
@@ -84,6 +87,7 @@ app.add_middleware(
 )
 
 soul = DigitalSoul()
+_soul_lock = threading.Lock()
 
 
 # ---------------------------------------------------------------------------
@@ -151,7 +155,9 @@ class CustomRunRequest(BaseModel):
     dt: float = Field(0.05, gt=0)
     t_max: float = Field(200.0, gt=0, le=1000.0)
     soma: SubsystemIn = Field(default_factory=SubsystemIn)
-    psyche: SubsystemIn = Field(default_factory=SubsystemIn)
+    psyche: SubsystemIn = Field(
+        default_factory=lambda: SubsystemIn(a=0.20, epsilon=0.008, b=0.45)
+    )
     coupling: CouplingIn = Field(default_factory=CouplingIn)
     emotion: EmotionIn = Field(default_factory=EmotionIn)
     savage_mode: bool = False
@@ -336,20 +342,19 @@ def run_scenario(
     name: str, adapter: str = "default",
     _user: str = Depends(get_current_user),
 ):
-    soul.set_adapter(adapter)
-    try:
-        results, report = soul.run_scenario(name)
-    except ValueError as exc:
-        raise HTTPException(404, str(exc))
-    return _results_to_out(
-        results, report, soul.get_alignment(), soul.get_arc()
-    )
+    with _soul_lock:
+        soul.set_adapter(adapter)
+        try:
+            results, report = soul.run_scenario(name)
+        except ValueError as exc:
+            raise HTTPException(404, str(exc))
+        return _results_to_out(
+            results, report, soul.get_alignment(), soul.get_arc()
+        )
 
 
 @app.post("/run/custom", response_model=SimulationOut)
 def run_custom(req: CustomRunRequest, _user: str = Depends(get_current_user)):
-    soul.set_adapter(req.adapter)
-
     if req.savage_mode:
         config = savage_config(t_max=req.t_max)
     else:
@@ -374,18 +379,20 @@ def run_custom(req: CustomRunRequest, _user: str = Depends(get_current_user)):
             ),
             savage_mode=False,
         )
-    try:
-        results, report = soul.run_custom(
-            config=config,
-            ic=(req.ic_u1, req.ic_v1, req.ic_u2, req.ic_v2),
-            I1_func=_make_stimulus(req.soma_stimulus),
-            I2_func=_make_stimulus(req.psyche_stimulus),
+    with _soul_lock:
+        soul.set_adapter(req.adapter)
+        try:
+            results, report = soul.run_custom(
+                config=config,
+                ic=(req.ic_u1, req.ic_v1, req.ic_u2, req.ic_v2),
+                I1_func=_make_stimulus(req.soma_stimulus),
+                I2_func=_make_stimulus(req.psyche_stimulus),
+            )
+        except ValueError as exc:
+            raise HTTPException(422, str(exc))
+        return _results_to_out(
+            results, report, soul.get_alignment(), soul.get_arc()
         )
-    except ValueError as exc:
-        raise HTTPException(422, str(exc))
-    return _results_to_out(
-        results, report, soul.get_alignment(), soul.get_arc()
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -489,7 +496,8 @@ def list_adapters():
 def set_adapter(name: str, _user: str = Depends(get_current_user)):
     if name not in PEFT_ADAPTERS:
         raise HTTPException(404, f"Unknown adapter: {name}")
-    a = soul.set_adapter(name)
+    with _soul_lock:
+        a = soul.set_adapter(name)
     return {"name": a.name, "label": a.label}
 
 
@@ -511,12 +519,13 @@ def get_character_appearance(step: int | None = None):
 
 @app.get("/character/image")
 def get_character_image(step: int | None = None):
-    """Render character PNG from current simulation state."""
+    """Render character image from current simulation state."""
     snap = soul.get_state_snapshot(step)
     if snap is None:
         raise HTTPException(404, "No simulation has been run yet.")
     report = soul._last_report
     regime_name = report.coupled_regime.name if report else "QUIESCENT"
     appearance = compute_appearance(snap, regime_name)
-    png_bytes = render_character(appearance)
-    return Response(content=png_bytes, media_type="image/png")
+    img_bytes = render_character(appearance)
+    media_type = "image/png" if _HAS_PIL else "image/x-portable-pixmap"
+    return Response(content=img_bytes, media_type=media_type)
